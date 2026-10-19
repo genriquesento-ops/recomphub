@@ -184,3 +184,32 @@ $i.ToBitmap().Save($env:RH_OUT, [System.Drawing.Imaging.ImageFormat]::Png)";
         Err("Não consegui ler o ícone do programa.".into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn templates_fill_serial_and_title() {
+        let t = "https://x.org/${serial}/${title}.png";
+        assert_eq!(fill(t, Some("CUSA01715"), "God of War").unwrap(), "https://x.org/CUSA01715/God%20of%20War.png");
+        assert_eq!(fill(t, None, "x"), None, "sem serial não monta o endereço");
+        assert_eq!(fill("https://x.org/${title}.jpg", None, "Majora's").unwrap(), "https://x.org/Majora%27s.jpg");
+    }
+
+    #[test]
+    fn only_https_templates_that_name_the_game() {
+        assert!(clean_templates(&["http://x/${serial}".into()]).is_err());
+        assert!(clean_templates(&["https://x/capa.png".into()]).is_err());
+        let ok = clean_templates(&["  https://x/${serial}.jpg ".into(), "".into(), "https://x/${serial}.jpg".into()]).unwrap();
+        assert_eq!(ok, vec!["https://x/${serial}.jpg".to_string()]);
+    }
+
+    #[test]
+    fn images_are_recognised_by_their_bytes() {
+        assert_eq!(sniff(b"\x89PNG\r\n\x1a\n...."), Some("png"));
+        assert_eq!(sniff(b"\xFF\xD8\xFF\xE0...."), Some("jpg"));
+        assert_eq!(sniff(b"RIFF\0\0\0\0WEBPVP8 "), Some("webp"));
+        assert_eq!(sniff(b"<!DOCTYPE html>"), None);
+    }
+}

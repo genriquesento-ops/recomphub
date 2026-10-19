@@ -173,3 +173,23 @@ fn common_root(names: &[PathBuf]) -> Option<PathBuf> {
     let has_children = names.iter().any(|n| n.components().count() > 1);
     (all_inside && has_children).then_some(root)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::common_root;
+    use std::path::PathBuf;
+
+    fn paths(list: &[&str]) -> Vec<PathBuf> {
+        list.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn single_top_folder_is_stripped() {
+        let wrapped = paths(&["gow3-windows/", "gow3-windows/run.py", "gow3-windows/bin/x.dll"]);
+        assert_eq!(common_root(&wrapped), Some(PathBuf::from("gow3-windows")));
+        let flat = paths(&["BanjoRecompiled.exe", "SDL2.dll", "assets/Banjo.svg"]);
+        assert_eq!(common_root(&flat), None);
+        assert_eq!(common_root(&paths(&["only.exe"])), None);
+        assert_eq!(common_root(&[]), None);
+    }
+}

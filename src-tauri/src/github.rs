@@ -103,3 +103,13 @@ fn parse_time(s: &str) -> Option<u64> {
     let days = era * 146097 + doe - 719468;
     u64::try_from(days * 86400 + hh * 3600 + mm * 60 + ss).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn release_dates() {
+        assert_eq!(super::parse_time("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(super::parse_time("2026-10-18T06:10:15Z"), Some(1_792_303_815));
+        assert_eq!(super::parse_time("ontem"), None);
+    }
+}

@@ -37,3 +37,12 @@ pub fn create(folder: &Path, title: &str, id: &str, icon: &Path) -> Result<PathB
     }
     Ok(lnk)
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn titles_become_valid_file_names() {
+        assert_eq!(super::file_name("The Legend of Zelda: Majora's Mask"), "The Legend of Zelda Majora's Mask");
+        assert_eq!(super::file_name(r" a/b\c?*<>| "), "abc");
+    }
+}
