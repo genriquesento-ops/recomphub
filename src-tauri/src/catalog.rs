@@ -11,6 +11,13 @@ pub enum Kind {
     Banjo,
 }
 
+/// A page that helps the player make their own copy of the game files.
+#[derive(serde::Serialize)]
+pub struct GuideLink {
+    pub label: &'static str,
+    pub url: &'static str,
+}
+
 pub struct GameDef {
     pub id: &'static str,
     pub kind: Kind,
@@ -37,6 +44,9 @@ pub struct GameDef {
     pub needs: &'static str,
     pub files_help: &'static str,
     pub requirements: &'static str,
+    /// "Como obter seus arquivos": steps to copy the game from the player's own copy.
+    pub guide: &'static [&'static str],
+    pub guide_links: &'static [GuideLink],
 }
 
 pub const GAMES: &[GameDef] = &[
@@ -59,6 +69,16 @@ pub const GAMES: &[GameDef] = &[
         needs: "A pasta com o dump da sua própria cópia de PS4 (a que tem eboot.bin, sce_module e sce_sys).",
         files_help: "O dump é feito no seu PS4 com o jogo instalado. Versões testadas pelo port: CUSA01623 e CUSA01715, versões 01.00 e 01.02.",
         requirements: "Windows 10/11 64-bit, processador com AVX e placa de vídeo com Vulkan 1.3.",
+        guide: &[
+            "Você precisa de um PS4 com o God of War III Remastered instalado: do disco ou comprado na sua conta.",
+            "Com uma ferramenta de dump para PS4, copie o jogo instalado para um HD externo. O resultado é uma pasta com eboot.bin, sce_module e sce_sys.",
+            "Se o seu PS4 tiver a atualização 01.02, copie também a pasta da atualização: o port aceita as duas versões.",
+            "Passe a pasta para o PC e escolha-a aqui no RecompHUB. Ele confere o código do jogo e a versão.",
+        ],
+        guide_links: &[GuideLink {
+            label: "Instruções do gow3_pc",
+            url: "https://github.com/FelipePrado0/gow3_pc#download-and-play",
+        }],
     },
     GameDef {
         id: "banjo",
@@ -79,6 +99,15 @@ pub const GAMES: &[GameDef] = &[
         needs: "O arquivo da ROM da sua própria cópia: Banjo-Kazooie norte-americano (USA), versão 1.0.",
         files_help: "A ROM é a cópia do cartucho de N64, feita com um leitor de cartuchos. Formatos aceitos: .z64, .n64 e .v64 (não compactado).",
         requirements: "Windows 10/11 64-bit e placa de vídeo com Direct3D 12 ou Vulkan 1.2.",
+        guide: &[
+            "Você precisa do cartucho original do Banjo-Kazooie norte-americano (NTSC-U).",
+            "Ligue um leitor de cartuchos de N64 ao PC e copie o cartucho para um arquivo .z64.",
+            "Escolha o arquivo aqui no RecompHUB. Ele confere se é exatamente a versão USA 1.0 e explica o que estiver diferente.",
+        ],
+        guide_links: &[
+            GuideLink { label: "Sanni Cart Reader (leitor de cartuchos aberto)", url: "https://github.com/sanni/cartreader" },
+            GuideLink { label: "Instruções do Banjo: Recompiled", url: "https://github.com/BanjoRecomp/BanjoRecomp#readme" },
+        ],
     },
 ];
 

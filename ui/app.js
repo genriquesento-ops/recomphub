@@ -3,6 +3,8 @@ const { listen } = window.__TAURI__.event;
 
 let games = [];
 let openId = null;
+let tab = 'all';          // 'all', 'port' or 'pc_game'
+let tagFilter = null;     // one of the player's tags, or null
 const progress = {};      // id -> { stage, done, total }
 const filesResult = {};   // id -> last check after the player picked files
 
@@ -13,6 +15,7 @@ const STATUS_TEXT = {
   starting: 'Abrindo…',
   running: 'Jogando',
   installing: 'Instalando',
+  missing: 'Programa não encontrado',
 };
 
 const IN_GAME = ['starting', 'running'];
@@ -77,8 +80,34 @@ function chips(g) {
   return html;
 }
 
+function visibleGames() {
+  return games.filter((g) =>
+    (tab === 'all' || g.kind === tab) && (!tagFilter || g.tags.includes(tagFilter)));
+}
+
+function renderTabs() {
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  const tags = [...new Set(games.flatMap((g) => g.tags))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  if (tagFilter && !tags.includes(tagFilter)) tagFilter = null;
+  $('#tagbar').innerHTML = tags.map((t) =>
+    `<button class="tag${t === tagFilter ? ' on' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
+  document.querySelectorAll('#tagbar .tag').forEach((b) => b.addEventListener('click', () => {
+    tagFilter = tagFilter === b.dataset.tag ? null : b.dataset.tag;
+    render();
+  }));
+}
+
 function renderGrid() {
-  $('#grid').innerHTML = games.map((g) => `
+  renderTabs();
+  const list = visibleGames();
+  const empty = $('#empty');
+  empty.hidden = list.length > 0;
+  if (!list.length) {
+    empty.textContent = tab === 'pc_game' && !tagFilter
+      ? 'Nenhum jogo de PC ainda. Use "Adicionar jogo de PC" e escolha o programa (.exe) de um jogo que você já tem instalado.'
+      : 'Nenhum jogo com esse filtro.';
+  }
+  $('#grid').innerHTML = list.map((g) => `
     <div class="card" data-id="${g.id}">
       ${coverHtml(g)}
       <div class="body">
@@ -112,6 +141,94 @@ function filesBox(g) {
       <p><b>O que você precisa:</b> ${esc(g.needs)}</p>
       <p class="muted">${esc(g.files_help)} O RecompHUB nunca baixa arquivos de jogos: eles vêm da sua cópia.</p>
       <div class="row"><button class="primary" data-act="files">${label}</button></div>
+    </div>
+    ${guideBox(g)}`;
+}
+
+function guideBox(g) {
+  if (!g.guide.length) return '';
+  return `
+    <div class="box">
+      <h3>Como obter seus arquivos</h3>
+      <ol>${g.guide.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+      ${g.guide_links.length ? `<div class="row">${g.guide_links.map((l) =>
+        `<button class="link" data-act="link" data-url="${esc(l.url)}">${esc(l.label)}</button>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+function tagsBox(g) {
+  if (!g.in_library) return '';
+  return `
+    <div class="box">
+      <h3>Etiquetas</h3>
+      <div class="tags-edit">
+        <input type="text" id="tags-input" placeholder="Ex.: favoritos, zerado, coop" value="${esc(g.tags.join(', '))}">
+        <button data-act="tags">Salvar etiquetas</button>
+      </div>
+      <p class="muted">Separe com vírgulas. Use as etiquetas para filtrar a biblioteca.</p>
+    </div>`;
+}
+
+function playRow(g, what) {
+  if (IN_GAME.includes(g.status)) {
+    return `
+      <div class="row">
+        <button class="primary play" disabled>${g.status === 'running' ? `Jogando há ${sessionLength(g)}` : 'Abrindo…'}</button>
+        ${g.status === 'running' ? '<button class="danger" data-act="stop">Fechar jogo</button>' : ''}
+      </div>
+      <p class="muted">O tempo é contado enquanto ${what} estiver aberto e salvo a cada 30 segundos.</p>`;
+  }
+  return `
+    <div class="row">
+      <button class="primary play" data-act="play" ${g.status !== 'ready' ? 'disabled' : ''}>Jogar</button>
+    </div>`;
+}
+
+function shortcutsRow(g) {
+  return `
+    <div class="row">
+      <button class="ghost" data-act="shortcut-desktop">Atalho na área de trabalho</button>
+      <button class="ghost" data-act="shortcut-start">Atalho no menu Iniciar</button>
+      ${g.kind === 'port' ? '<button class="ghost" data-act="saves">Abrir pasta de saves</button>' : ''}
+    </div>
+    <p class="muted">Os atalhos abrem o jogo pelo RecompHUB, então o tempo de jogo continua sendo contado.</p>`;
+}
+
+function renderPcDetail(g) {
+  const missing = g.status === 'missing' ? `
+    <div class="box bad">
+      <h3>Programa não encontrado</h3>
+      <p>O RecompHUB não achou mais ${esc(g.install_dir)}. Se você moveu o jogo, remova-o da biblioteca e adicione de novo.</p>
+    </div>` : '';
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="back">← Biblioteca</button>
+    <div class="detail">
+      <div>${coverHtml(g)}</div>
+      <div>
+        <h2>${esc(g.title)}</h2>
+        <div class="credit">Jogo de PC adicionado por você.</div>
+        <div>${chips(g)}</div>
+        <div class="stats">
+          <div><div class="k">Tempo de jogo</div><div class="v">${playTime(g.total_seconds)}</div></div>
+          <div><div class="k">Última sessão</div><div class="v">${lastPlayed(g.last_played)}</div></div>
+        </div>
+        ${missing}
+        ${playRow(g, 'o jogo')}
+        ${shortcutsRow(g)}
+        <div class="box">
+          <h3>Nome</h3>
+          <div class="tags-edit">
+            <input type="text" id="title-input" value="${esc(g.title)}">
+            <button data-act="rename">Renomear</button>
+          </div>
+        </div>
+        ${tagsBox(g)}
+        <div class="row">
+          <button class="ghost" data-act="folder">Abrir pasta do jogo</button>
+          <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
+        </div>
+        <p class="muted">Remover da biblioteca não apaga nenhum arquivo. ${esc(g.install_dir || '')}</p>
+      </div>
     </div>`;
 }
 
@@ -130,7 +247,18 @@ function progressBox(g) {
 
 function renderDetail() {
   const g = games.find((x) => x.id === openId);
-  if (!g) return;
+  if (!g) {
+    openId = null;
+    render();
+    return;
+  }
+  if (g.kind === 'pc_game') renderPcDetail(g);
+  else renderPortDetail(g);
+  document.querySelectorAll('#detail [data-act]').forEach((el) =>
+    el.addEventListener('click', () => act(el.dataset.act, g, el)));
+}
+
+function renderPortDetail(g) {
   const latest = versionLabel(g.latest_version);
   const version = versionLabel(g.version) || (g.status !== 'not_installed' ? 'não identificada (adicionada de uma pasta)' : null);
 
@@ -147,7 +275,8 @@ function renderDetail() {
           <button class="primary" data-act="install">Instalar</button>
           <button data-act="add">Já tenho instalado: escolher a pasta</button>
         </div>
-      </div>`;
+      </div>
+      ${guideBox(g)}`;
   } else {
     if (g.update_available) {
       main += `
@@ -157,27 +286,10 @@ function renderDetail() {
           <div class="row"><button data-act="install" ${IN_GAME.includes(g.status) ? 'disabled' : ''}>Atualizar</button></div>
         </div>`;
     }
-    if (IN_GAME.includes(g.status)) {
-      main += `
-        <div class="row">
-          <button class="primary play" disabled>${g.status === 'running' ? `Jogando há ${sessionLength(g)}` : 'Abrindo…'}</button>
-          ${g.status === 'running' ? '<button class="danger" data-act="stop">Fechar jogo</button>' : ''}
-        </div>
-        <p class="muted">O tempo é contado enquanto o port estiver aberto e salvo a cada 30 segundos.</p>`;
-    } else {
-      main += `
-        <div class="row">
-          <button class="primary play" data-act="play" ${g.status !== 'ready' ? 'disabled' : ''}>Jogar</button>
-        </div>`;
-    }
+    main += playRow(g, 'o port');
     main += filesBox(g);
-    main += `
-      <div class="row">
-        <button class="ghost" data-act="shortcut-desktop">Atalho na área de trabalho</button>
-        <button class="ghost" data-act="shortcut-start">Atalho no menu Iniciar</button>
-        <button class="ghost" data-act="saves">Abrir pasta de saves</button>
-      </div>
-      <p class="muted">Os atalhos abrem o jogo pelo RecompHUB, então o tempo de jogo continua sendo contado.</p>`;
+    main += shortcutsRow(g);
+    main += tagsBox(g);
   }
 
   $('#detail').innerHTML = `
@@ -203,9 +315,6 @@ function renderDetail() {
           <p class="muted">Remover da biblioteca não apaga nenhum arquivo. ${esc(g.install_dir || '')}</p>` : ''}
       </div>
     </div>`;
-
-  document.querySelectorAll('#detail [data-act]').forEach((el) =>
-    el.addEventListener('click', () => act(el.dataset.act, g)));
 }
 
 function render() {
@@ -219,6 +328,7 @@ function render() {
 function setGame(g) {
   const i = games.findIndex((x) => x.id === g.id);
   if (i >= 0) games[i] = g;
+  else games.push(g);
   render();
 }
 
@@ -232,8 +342,21 @@ function openGame(id) {
   render();
 }
 
-async function act(action, g) {
+async function act(action, g, el) {
   switch (action) {
+    case 'link':
+      await call('open_link', { url: el.dataset.url });
+      break;
+    case 'tags': {
+      const tags = $('#tags-input').value.split(',');
+      setGame(await call('set_tags', { id: g.id, tags }));
+      toast('Etiquetas salvas.');
+      break;
+    }
+    case 'rename':
+      setGame(await call('rename_game', { id: g.id, title: $('#title-input').value }));
+      toast('Nome salvo.');
+      break;
     case 'back':
       openId = null;
       render();
@@ -304,7 +427,22 @@ async function addExisting() {
   toast(`${g.title} adicionado à biblioteca.`);
 }
 
+async function addPcGame() {
+  const g = await call('add_pc_game');
+  if (!g) return;
+  await refresh();
+  openGame(g.id);
+  toast(g.kind === 'port'
+    ? `Esse programa é do port ${g.port_name}: ${g.title} foi adicionado como port.`
+    : `${g.title} adicionado em "Outros jogos de PC". Você pode renomear na página do jogo.`);
+}
+
 $('#btn-add').addEventListener('click', addExisting);
+$('#btn-add-pc').addEventListener('click', addPcGame);
+document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => {
+  tab = b.dataset.tab;
+  render();
+}));
 $('#btn-updates').addEventListener('click', async () => {
   games = await call('check_updates');
   render();
@@ -319,7 +457,11 @@ listen('install-progress', (e) => {
 
 listen('session', async (e) => {
   const { id, state, seconds } = e.payload;
-  setGame(await invoke('get_game', { id }));
+  try {
+    setGame(await invoke('get_game', { id }));
+  } catch {
+    return; // removed from the library meanwhile
+  }
   // "Abrindo…" ends after a minute if the port never showed up.
   if (state === 'starting') setTimeout(async () => setGame(await invoke('get_game', { id })), 61000);
   if (state === 'ended' && seconds > 0) {

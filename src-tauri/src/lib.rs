@@ -33,8 +33,10 @@ pub struct AppState {
 /// Everything the interface shows about one game.
 #[derive(Serialize)]
 struct GameView {
-    id: &'static str,
-    title: &'static str,
+    id: String,
+    /// "port" (from the catalog) or "pc_game" (added by the player)
+    kind: &'static str,
+    title: String,
     family: &'static str,
     port_name: &'static str,
     port_authors: &'static str,
@@ -43,6 +45,9 @@ struct GameView {
     files_help: &'static str,
     files_kind: &'static str,
     requirements: &'static str,
+    guide: &'static [&'static str],
+    guide_links: &'static [catalog::GuideLink],
+    tags: Vec<String>,
     /// "not_installed", "needs_files", "ready", "starting", "running" or "installing"
     status: &'static str,
     /// Unix time the running session started.
@@ -114,8 +119,9 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
     };
 
     GameView {
-        id: game.id,
-        title: game.title,
+        id: game.id.to_string(),
+        kind: "port",
+        title: game.title.to_string(),
         family: game.family,
         port_name: game.port_name,
         port_authors: game.port_authors,
@@ -124,6 +130,9 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         files_help: game.files_help,
         files_kind: game.files_kind,
         requirements: game.requirements,
+        guide: game.guide,
+        guide_links: game.guide_links,
+        tags: entry.as_ref().map(|e| e.tags.clone()).unwrap_or_default(),
         status,
         session_started,
         in_library: entry.is_some(),
@@ -138,6 +147,67 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
     }
 }
 
+/// A PC game the player added: RecompHUB only opens it and times it.
+fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
+    let (running, launching, session_started) = {
+        let s = state.sessions.lock().unwrap();
+        (s.is_running(id), s.is_launching(id), s.started(id))
+    };
+    let exe = pc_exe(entry);
+    let status = if running {
+        "running"
+    } else if launching {
+        "starting"
+    } else if exe.as_deref().map(Path::is_file).unwrap_or(false) {
+        "ready"
+    } else {
+        "missing"
+    };
+    GameView {
+        id: id.to_string(),
+        kind: "pc_game",
+        title: entry.title.clone().unwrap_or_else(|| "Jogo sem nome".into()),
+        family: "PC",
+        port_name: "",
+        port_authors: "",
+        project_url: "",
+        needs: "",
+        files_help: "",
+        files_kind: "",
+        requirements: "",
+        guide: &[],
+        guide_links: &[],
+        tags: entry.tags.clone(),
+        status,
+        session_started,
+        in_library: true,
+        install_dir: exe.map(|p| p.display().to_string()),
+        version: None,
+        latest_version: None,
+        update_available: false,
+        files: None,
+        total_seconds: entry.total_seconds,
+        last_played: entry.last_played,
+        cover: None,
+    }
+}
+
+fn pc_exe(entry: &library::Entry) -> Option<PathBuf> {
+    entry.exe.as_ref().map(|e| Path::new(&entry.install_dir).join(e))
+}
+
+/// Any game the interface can ask about: a catalog port or a PC game in the library.
+fn view_any(state: &AppState, id: &str) -> Result<GameView, String> {
+    if let Some(game) = catalog::get(id) {
+        return Ok(view(state, game));
+    }
+    let entry = state.library.lock().unwrap().games.get(id).cloned();
+    match entry {
+        Some(e) if e.kind == library::EntryKind::PcGame => Ok(view_pc(state, id, &e)),
+        _ => Err("Este jogo não está mais na biblioteca.".into()),
+    }
+}
+
 fn game_or_err(id: &str) -> Result<&'static GameDef, String> {
     catalog::get(id).ok_or_else(|| format!("Jogo desconhecido: {id}"))
 }
@@ -149,12 +219,128 @@ fn save(state: &AppState) -> Result<(), String> {
 #[tauri::command]
 fn get_library(app: AppHandle) -> Vec<GameView> {
     let state = app.state::<AppState>();
-    catalog::GAMES.iter().map(|g| view(&state, g)).collect()
+    let mut list: Vec<GameView> = catalog::GAMES.iter().map(|g| view(&state, g)).collect();
+    let pc: Vec<(String, library::Entry)> = state
+        .library
+        .lock()
+        .unwrap()
+        .games
+        .iter()
+        .filter(|(_, e)| e.kind == library::EntryKind::PcGame)
+        .map(|(id, e)| (id.clone(), e.clone()))
+        .collect();
+    let mut pc: Vec<GameView> = pc.iter().map(|(id, e)| view_pc(&state, id, e)).collect();
+    pc.sort_by_key(|g| g.title.to_lowercase());
+    list.extend(pc);
+    list
 }
 
 #[tauri::command]
 fn get_game(app: AppHandle, id: String) -> Result<GameView, String> {
-    Ok(view(&app.state::<AppState>(), game_or_err(&id)?))
+    view_any(&app.state::<AppState>(), &id)
+}
+
+/// Folders a PC game must not be timed by: everything else running there would count.
+fn too_broad(dir: &Path) -> bool {
+    if dir.parent().is_none() {
+        return true;
+    }
+    let norm = |p: &Path| p.to_string_lossy().trim_end_matches('\\').to_lowercase();
+    let here = norm(dir);
+    ["WINDIR", "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE"]
+        .iter()
+        .filter_map(|v| std::env::var_os(v))
+        .map(PathBuf::from)
+        .flat_map(|p| [p.join("Desktop"), p.join("Downloads"), p])
+        .any(|p| norm(&p) == here)
+}
+
+/// "Adicionar outro jogo de PC": the player points at the game's program.
+/// Ok(None) when the player closed the dialog.
+#[tauri::command]
+async fn add_pc_game(app: AppHandle) -> Result<Option<GameView>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Escolha o programa do jogo (.exe)")
+        .add_filter("Programa", &["exe"])
+        .blocking_pick_file()
+        .and_then(|p| p.into_path().ok());
+    let Some(exe) = picked else { return Ok(None) };
+    let dir = exe.parent().map(Path::to_path_buf).ok_or("Escolha um arquivo .exe.")?;
+
+    // A catalog port gets its full page (files check, updates) instead.
+    if let Some((game, port_dir)) = catalog::identify(&dir) {
+        let state = app.state::<AppState>();
+        state.library.lock().unwrap().add(game.id, &port_dir, None);
+        save(&state)?;
+        return Ok(Some(view(&state, game)));
+    }
+    if too_broad(&dir) {
+        return Err(format!(
+            "O jogo está direto em {}. Coloque-o numa pasta só dele: o RecompHUB conta o tempo de jogo por pasta, e aqui contaria outros programas também.",
+            dir.display()
+        ));
+    }
+
+    let key = exe.to_string_lossy().to_lowercase();
+    let id = format!("pc-{:016x}", xxhash_rust::xxh3::xxh3_64(key.as_bytes()));
+    let state = app.state::<AppState>();
+    if state.library.lock().unwrap().games.contains_key(&id) {
+        return Err("Este jogo já está na biblioteca.".into());
+    }
+    let title = exe.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Jogo".into());
+    state.library.lock().unwrap().add_pc_game(&id, &exe, &title);
+    save(&state)?;
+    view_any(&state, &id).map(Some)
+}
+
+#[tauri::command]
+fn rename_game(app: AppHandle, id: String, title: String) -> Result<GameView, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("O nome não pode ficar vazio.".into());
+    }
+    let state = app.state::<AppState>();
+    {
+        let mut lib = state.library.lock().unwrap();
+        let entry = lib.games.get_mut(&id).filter(|e| e.kind == library::EntryKind::PcGame);
+        entry.ok_or("Só jogos adicionados por você podem ser renomeados.")?.title = Some(title);
+    }
+    save(&state)?;
+    view_any(&state, &id)
+}
+
+/// The player's labels: trimmed, without repeats, at most 12.
+#[tauri::command]
+fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<GameView, String> {
+    let mut clean: Vec<String> = Vec::new();
+    for t in tags {
+        let t = t.trim().chars().take(30).collect::<String>();
+        if !t.is_empty() && !clean.iter().any(|c| c.to_lowercase() == t.to_lowercase()) {
+            clean.push(t);
+        }
+    }
+    clean.truncate(12);
+    let state = app.state::<AppState>();
+    {
+        let mut lib = state.library.lock().unwrap();
+        lib.games.get_mut(&id).ok_or("Adicione o jogo à biblioteca primeiro.")?.tags = clean;
+    }
+    save(&state)?;
+    view_any(&state, &id)
+}
+
+#[tauri::command]
+fn open_link(app: AppHandle, url: String) -> Result<(), String> {
+    // Only pages the catalog lists: never an address from elsewhere.
+    let known = catalog::GAMES
+        .iter()
+        .any(|g| g.project_url == url || g.guide_links.iter().any(|l| l.url == url));
+    if !known {
+        return Err("Link fora do catálogo.".into());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Asks each project's GitHub page for its newest release. Offline is not an error here.
@@ -266,17 +452,23 @@ async fn provide_files(app: AppHandle, id: String) -> Result<Option<FilesStatus>
 
 #[tauri::command]
 fn play(app: AppHandle, id: String) -> Result<(), String> {
-    let game = game_or_err(&id)?;
-    let v = view(&app.state::<AppState>(), game);
+    let state = app.state::<AppState>();
+    let v = view_any(&state, &id)?;
     match v.status {
         "ready" => {}
         "running" | "starting" => return Err("O jogo já está aberto.".into()),
         "needs_files" => return Err("Faltam os arquivos do jogo. Veja os detalhes na página do jogo.".into()),
         "installing" => return Err("Espere a instalação terminar.".into()),
+        "missing" => return Err("O programa do jogo não está mais no lugar. Ele foi movido ou apagado?".into()),
         _ => return Err("O jogo não está instalado.".into()),
     }
-    let dir = PathBuf::from(v.install_dir.unwrap());
-    play::start(&app, &id, &dir, game.exe)
+    let entry = state.library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
+    let dir = PathBuf::from(&entry.install_dir);
+    let exe = match catalog::get(&id) {
+        Some(game) => game.exe.to_string(),
+        None => entry.exe.clone().ok_or("Jogo sem programa definido.")?,
+    };
+    play::start(&app, &id, &dir, &exe)
 }
 
 #[tauri::command]
@@ -296,8 +488,8 @@ fn open_saves(app: AppHandle, id: String) -> Result<(), String> {
 /// `location`: "desktop" or "start_menu".
 #[tauri::command]
 fn create_shortcut(app: AppHandle, id: String, location: String) -> Result<String, String> {
-    let game = game_or_err(&id)?;
-    let dir = app.state::<AppState>().library.lock().unwrap().install_dir(&id).ok_or("Jogo fora da biblioteca.")?;
+    let entry = app.state::<AppState>().library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
+    let dir = PathBuf::from(&entry.install_dir);
     let folder = match location.as_str() {
         "desktop" => app.path().desktop_dir().map_err(|e| e.to_string())?,
         _ => app
@@ -306,8 +498,18 @@ fn create_shortcut(app: AppHandle, id: String, location: String) -> Result<Strin
             .map_err(|e| e.to_string())?
             .join("Microsoft\\Windows\\Start Menu\\Programs\\RecompHUB"),
     };
-    let icon = Some(dir.join(game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(game.exe));
-    shortcut::create(&folder, game.title, game.id, &icon).map(|p| p.display().to_string())
+    let (title, icon) = match catalog::get(&id) {
+        Some(game) => {
+            let icon = Some(dir.join(game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(game.exe));
+            (game.title.to_string(), icon)
+        }
+        // A PC game's program carries its own icon.
+        None => (
+            entry.title.clone().unwrap_or_else(|| "Jogo".into()),
+            pc_exe(&entry).ok_or("Jogo sem programa definido.")?,
+        ),
+    };
+    shortcut::create(&folder, &title, &id, &icon).map(|p| p.display().to_string())
 }
 
 #[tauri::command]
@@ -319,8 +521,8 @@ fn take_pending_open(app: AppHandle) -> Option<String> {
 fn handle_args(app: &AppHandle, args: &[String]) {
     let Some(i) = args.iter().position(|a| a == "--play") else { return };
     let Some(id) = args.get(i + 1) else { return };
-    let Some(game) = catalog::get(id) else { return };
-    let ready = view(&app.state::<AppState>(), game).status == "ready";
+    let Ok(v) = view_any(&app.state::<AppState>(), id) else { return };
+    let ready = v.status == "ready";
     let launched = ready && play(app.clone(), id.clone()).is_ok();
     if !launched {
         // The page may not be loaded yet (RecompHUB just started): it asks on load.
@@ -393,6 +595,10 @@ pub fn run() {
             stop_game,
             open_saves,
             create_shortcut,
+            add_pc_game,
+            rename_game,
+            set_tags,
+            open_link,
             take_pending_open,
             remove_game,
             open_project,

@@ -21,6 +21,10 @@ oficiais de cada projeto, e cada jogo mostra o crédito de quem fez o port.
 - Confere os arquivos da sua cópia e explica em linguagem simples o que falta.
 - Conta o tempo de jogo mesmo quando o jogo é aberto por fora do RecompHUB, salvando a cada
   30 segundos.
+- Página "Como obter seus arquivos" em cada port, com o passo a passo para copiar o jogo da sua
+  própria cópia.
+- "Outros jogos de PC": adicione qualquer jogo instalado pelo .exe para ter tempo de jogo e
+  atalhos no mesmo lugar. Abas e etiquetas para organizar a biblioteca.
 - Botão para fechar o jogo, atalhos na área de trabalho e no menu Iniciar (que abrem o jogo pelo
   RecompHUB) e acesso à pasta de saves.
 

@@ -11,14 +11,22 @@
     <div class="brand">Recomp<span>HUB</span></div>
     <div class="actions">
       <button id="btn-updates" class="ghost">Verificar atualizações</button>
-      <button id="btn-add" class="primary">Adicionar jogo</button>
+      <button id="btn-add-pc">Adicionar jogo de PC</button>
+      <button id="btn-add" class="primary">Adicionar port</button>
     </div>
   </header>
 
   <main>
     <section id="library">
       <h1>Biblioteca</h1>
+      <div class="tabs" id="tabs">
+        <button data-tab="all">Todos</button>
+        <button data-tab="port">Ports</button>
+        <button data-tab="pc_game">Outros jogos de PC</button>
+      </div>
+      <div class="tagbar" id="tagbar"></div>
       <div id="grid" class="grid"></div>
+      <p id="empty" class="muted" hidden></p>
     </section>
 
     <section id="detail" hidden></section>
