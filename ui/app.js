@@ -17,6 +17,7 @@ const STATUS_TEXT = {
   running: 'Jogando',
   installing: 'Instalando',
   missing: 'Programa não encontrado',
+  needs_exe: 'Escolher programa',
 };
 
 const IN_GAME = ['starting', 'running'];
@@ -93,6 +94,7 @@ function inTab(g) {
   if (tab === 'discover') return g.kind === 'port' && !g.in_library;
   if (!g.in_library) return false;
   if (g.hidden && !settings.show_hidden) return false;
+  if (tab === 'port') return g.kind === 'port' || g.kind === 'community';
   return tab === 'all' || g.kind === tab;
 }
 
@@ -131,6 +133,8 @@ function renderTabs() {
 }
 
 function renderGrid() {
+  if (tab === 'community') return renderCommunityGrid();
+  $('#community-head').hidden = true;
   renderTabs();
   const list = visibleGames();
   const empty = $('#empty');
@@ -393,6 +397,7 @@ function renderSettings() {
 function renderDetail() {
   if (openId === '__covers') return renderCovers();
   if (openId === '__settings') return renderSettings();
+  if (openId && openId.startsWith('c:')) return renderCommunityItem(openId.slice(2));
   const g = games.find((x) => x.id === openId);
   if (!g) {
     openId = null;
@@ -400,6 +405,7 @@ function renderDetail() {
     return;
   }
   if (g.kind === 'pc_game') renderPcDetail(g);
+  else if (g.kind === 'community') renderCommunityDetail(g);
   else renderPortDetail(g);
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
     el.addEventListener('click', () => act(el.dataset.act, g, el)));
@@ -576,7 +582,30 @@ async function act(action, g, el) {
       render();
       break;
     case 'project':
-      await call('open_project', { id: g.id });
+      if (g.kind === 'community') await call('open_link', { url: g.project_url });
+      else await call('open_project', { id: g.id });
+      break;
+    case 'exe-list':
+      exeChoices[g.id] = await call('list_executables', { id: g.id });
+      render();
+      break;
+    case 'exe-set':
+      setGame(await call('set_executable', { id: g.id, exe: el.dataset.exe }));
+      delete exeChoices[g.id];
+      render();
+      toast('Programa escolhido. Agora é só jogar.');
+      break;
+    case 'community-update':
+      progress[g.id] = { id: g.id, stage: 'download', done: 0, total: 0 };
+      g.status = 'installing';
+      render();
+      try {
+        setGame(await invoke('install_community', { repo: g.repo, asset: null, title: g.title }));
+        toast(`${g.title} atualizado.`);
+      } catch (e) {
+        toast(String(e), true);
+        await refresh();
+      }
       break;
     case 'folder':
       await call('open_folder', { id: g.id });
@@ -743,7 +772,8 @@ $('#btn-updates').addEventListener('click', async () => {
 
 listen('install-progress', (e) => {
   progress[e.payload.id] = e.payload;
-  if (openId === e.payload.id) renderDetail();
+  const onItem = openId && openId.startsWith('c:') && communityId(openId.slice(2)) === e.payload.id;
+  if (openId === e.payload.id || onItem) renderDetail();
 });
 
 listen('session', async (e) => {
@@ -763,6 +793,235 @@ listen('session', async (e) => {
 
 listen('open-game', (e) => openGame(e.payload));
 listen('notify', (e) => toast(String(e.payload), true));
+
+// ---- Aba Comunidade: ports from the awesome list and GitHub topics, not verified ----
+
+let communityData = null;      // { items, fetched_at, errors, list_page }
+let communityLoading = false;
+const communityRelease = {};   // repo -> 'loading' | null | { tag, published, prerelease, assets }
+
+// Same as community::id_for in Rust.
+const communityId = (repo) => 'gh-' + repo.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 60);
+
+async function loadCommunity(force) {
+  communityLoading = true;
+  render();
+  try {
+    communityData = await call('get_community', { force });
+  } finally {
+    communityLoading = false;
+    render();
+  }
+}
+
+function communityMatches(i) {
+  if (tagFilter && i.console !== tagFilter) return false;
+  if (!search) return true;
+  const hay = [i.name, i.game, i.console, i.description, i.repo].join(' ').toLowerCase();
+  return search.toLowerCase().split(/\s+/).every((w) => hay.includes(w));
+}
+
+function renderCommunityGrid() {
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  const head = $('#community-head');
+  head.hidden = false;
+  if (!communityData && !communityLoading) loadCommunity(false);
+  const data = communityData || { items: [], errors: [], fetched_at: 0 };
+  head.innerHTML = `
+    <p>Ports feitos pela comunidade, puxados direto do GitHub: a lista
+      <button class="link" data-clink="${esc(data.list_page || '')}">awesome-unofficial-pc-ports</button>
+      e os tópicos <code>pc-port</code> e <code>n64recomp</code>.
+      <b>Eles não foram verificados pelo RecompHUB.</b> Os marcados "No catálogo" têm a versão verificada na aba Descobrir.</p>
+    <div class="row">
+      <button data-cact="refresh" ${communityLoading ? 'disabled' : ''}>${communityLoading ? 'Buscando no GitHub…' : 'Atualizar lista'}</button>
+      ${data.fetched_at ? `<span class="muted">Atualizada em ${lastPlayed(data.fetched_at)} · ${data.items.length} ports</span>` : ''}
+    </div>
+    ${data.errors.length ? `<p class="muted">Não consegui ler: ${data.errors.map(esc).join('; ')}.</p>` : ''}`;
+  head.querySelector('[data-cact=refresh]').addEventListener('click', () => loadCommunity(true));
+  const lp = head.querySelector('[data-clink]');
+  if (lp && lp.dataset.clink) lp.addEventListener('click', () => call('open_link', { url: lp.dataset.clink }));
+
+  const consoles = [...new Set(data.items.map((i) => i.console).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  if (tagFilter && !consoles.includes(tagFilter)) tagFilter = null;
+  $('#tagbar').innerHTML = consoles.map((t) =>
+    `<button class="tag${t === tagFilter ? ' on' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
+  document.querySelectorAll('#tagbar .tag').forEach((b) => b.addEventListener('click', () => {
+    tagFilter = tagFilter === b.dataset.tag ? null : b.dataset.tag;
+    render();
+  }));
+
+  const list = data.items.filter(communityMatches)
+    .sort((a, b) => (b.recommended - a.recommended) || ((b.stars || 0) - (a.stars || 0)) || a.name.localeCompare(b.name));
+  const empty = $('#empty');
+  empty.hidden = list.length > 0 || communityLoading;
+  empty.textContent = data.items.length ? 'Nenhum port com esse filtro.' : 'Nenhum port carregado. Verifique a internet e clique em "Atualizar lista".';
+  $('#grid').innerHTML = list.map((i) => `
+    <div class="card" data-repo="${esc(i.repo)}">
+      <div class="cover"><div class="placeholder">${esc(i.game || i.name)}</div></div>
+      <div class="body">
+        <div class="title">${esc(i.name)}</div>
+        <div>
+          ${i.console ? `<span class="chip family">${esc(i.console)}</span>` : ''}
+          ${i.recommended ? '<span class="chip fav">⭐ Recomendado</span>' : ''}
+          ${i.catalog_id ? '<span class="chip ready">No catálogo</span>' : ''}
+          ${i.installed_id ? '<span class="chip running">Na biblioteca</span>' : ''}
+        </div>
+        <div class="meta">${[i.game && i.game !== i.name ? esc(i.game) : '', i.stars != null ? `★ ${i.stars}` : '', i.pushed ? `atualizado em ${new Date(i.pushed * 1000).toLocaleDateString('pt-BR')}` : ''].filter(Boolean).join(' · ')}</div>
+      </div>
+    </div>`).join('');
+  document.querySelectorAll('#grid .card').forEach((el) => el.addEventListener('click', () => openGame('c:' + el.dataset.repo)));
+}
+
+function communityWarning() {
+  return `
+    <div class="box warn">
+      <h3>Instalação experimental: port não verificado</h3>
+      <ul>
+        <li>O RecompHUB baixa o .zip para Windows da página de releases deste projeto, mas não conferiu o port nem os arquivos que ele pede.</li>
+        <li>É um programa feito pela comunidade: só instale se confiar no projeto.</li>
+        <li>Siga o README do projeto para colocar os arquivos da sua própria cópia do jogo. O RecompHUB nunca baixa arquivos de jogos.</li>
+      </ul>
+    </div>`;
+}
+
+function renderCommunityItem(repo) {
+  const i = communityData && communityData.items.find((x) => x.repo === repo);
+  if (!i) { openId = null; render(); return; }
+  const id = communityId(repo);
+  const rel = communityRelease[repo];
+  let install = '';
+  if (i.catalog_id) {
+    install = `
+      <div class="box ok">
+        <h3>Este port está no catálogo verificado</h3>
+        <p>Use a versão do catálogo: o RecompHUB confere os arquivos do jogo e explica o que falta.</p>
+        <div class="row"><button class="primary" data-cact="catalog">Abrir no catálogo</button></div>
+      </div>`;
+  } else if (i.installed_id) {
+    install = `<div class="row"><button class="primary" data-cact="library">Abrir na biblioteca</button></div>`;
+  } else if (progress[id] && games.every((g) => g.id !== id)) {
+    install = progressBox({ id });
+  } else {
+    let files = '';
+    if (rel === 'loading') files = '<p class="muted">Procurando a versão para Windows no GitHub…</p>';
+    else if (rel === null) files = '<p>Este projeto não tem um .zip para Windows nos releases. Talvez precise ser compilado: veja a página do projeto.</p>';
+    else if (rel) {
+      files = `
+        <p>Versão <b>${esc(rel.tag)}</b>${rel.prerelease ? ' (pré-lançamento)' : ''} · ${new Date(rel.published * 1000).toLocaleDateString('pt-BR')}</p>
+        <ul class="versions">${rel.assets.map((a) => `
+          <li><span>${esc(a.name)} · ${(a.size / 1048576).toFixed(0)} MB</span>
+            <button data-cact="install" data-asset="${esc(a.name)}">Instalar (experimental)</button></li>`).join('')}
+        </ul>`;
+    }
+    install = `
+      ${communityWarning()}
+      <div class="box">
+        <h3>Versão para Windows</h3>
+        ${files || '<div class="row"><button data-cact="release">Ver versão para Windows</button></div>'}
+      </div>`;
+  }
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="back">← Comunidade</button>
+    <div class="covers-page">
+      <h2>${esc(i.name)}</h2>
+      <div class="credit">${i.game ? `${esc(i.game)} · ` : ''}${i.console ? `${esc(i.console)} · ` : ''}
+        <button class="link" data-cact="page">${esc(i.repo)} no GitHub</button></div>
+      <div>
+        ${i.recommended ? '<span class="chip fav">⭐ Recomendado pela lista</span>' : ''}
+        <span class="chip family">Fonte: ${i.sources.map(esc).join(' e ')}</span>
+        ${i.stars != null ? `<span class="chip family">★ ${i.stars}</span>` : ''}
+      </div>
+      ${i.description ? `<p>${esc(i.description)}</p>` : ''}
+      ${install}
+    </div>`;
+  const on = (sel, fn) => document.querySelectorAll(`#detail [data-cact=${sel}]`).forEach((el) => el.addEventListener('click', () => fn(el)));
+  document.querySelector('#detail [data-act=back]').addEventListener('click', () => { openId = null; render(); });
+  on('page', () => call('open_link', { url: `https://github.com/${repo}` }));
+  on('catalog', () => { tab = 'discover'; openGame(i.catalog_id); });
+  on('library', () => openGame(i.installed_id));
+  on('release', async () => {
+    communityRelease[repo] = 'loading';
+    render();
+    try {
+      communityRelease[repo] = await call('community_release', { repo });
+    } catch {
+      delete communityRelease[repo];
+    }
+    render();
+  });
+  on('install', async (el) => {
+    const ok = confirm(`Instalar ${i.name} em modo experimental?\n\nEste port não foi verificado pelo RecompHUB. Ele será baixado da página de releases de ${repo} no GitHub. Só continue se confiar no projeto.`);
+    if (!ok) return;
+    progress[id] = { id, stage: 'download', done: 0, total: 0 };
+    render();
+    try {
+      const g = await invoke('install_community', { repo, asset: el.dataset.asset, title: i.game || i.name });
+      setGame(g);
+      delete progress[id];
+      communityData = await invoke('get_community', { force: false });
+      openGame(g.id);
+      toast(g.status === 'needs_exe'
+        ? `${g.title} instalado. Escolha qual programa o botão Jogar deve abrir.`
+        : `${g.title} instalado. Leia o README do projeto para colocar os arquivos do jogo.`);
+    } catch (e) {
+      delete progress[id];
+      toast(String(e), true);
+      render();
+    }
+  });
+}
+
+const exeChoices = {};   // id -> list of .exe paths while choosing
+
+function renderCommunityDetail(g) {
+  const choices = exeChoices[g.id];
+  const exeBox = g.status === 'needs_exe' || choices ? `
+    <div class="box ${g.status === 'needs_exe' ? 'warn' : ''}">
+      <h3>Qual programa o botão Jogar abre?</h3>
+      ${Array.isArray(choices) ? `<ul class="versions">${choices.map((x) => `
+        <li><span>${esc(x)}</span><button data-act="exe-set" data-exe="${esc(x)}">Usar este</button></li>`).join('')}</ul>`
+        : '<div class="row"><button data-act="exe-list">Mostrar programas da pasta</button></div>'}
+    </div>` : '';
+  const update = g.update_available ? `
+    <div class="box warn">
+      <h3>Versão nova no GitHub: ${esc(g.latest_version)}</h3>
+      <p>Arquivos em saves, save, savedata, user e config são mantidos.</p>
+      <div class="row"><button data-act="community-update">Atualizar</button></div>
+    </div>` : '';
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="back">← Biblioteca</button>
+    <div class="detail">
+      <div>${coverColumn(g)}</div>
+      <div>
+        <h2>${esc(g.title)}</h2>
+        <div class="credit">Port da comunidade <b>${esc(g.port_name)}</b>, de ${esc(g.port_authors)} ·
+          <button class="link" data-act="project">página do projeto</button></div>
+        <div>${chips(g)}<span class="chip needs_files">Não verificado</span></div>
+        <div class="stats">
+          <div><div class="k">Tempo de jogo</div><div class="v">${playTime(g.total_seconds)}</div></div>
+          <div><div class="k">Última sessão</div><div class="v">${lastPlayed(g.last_played)}</div></div>
+          <div><div class="k">Versão</div><div class="v">${esc(g.version || '—')}</div></div>
+        </div>
+        ${g.status === 'installing' ? progressBox(g) : ''}
+        ${update}
+        ${playRow(g, 'o port')}
+        ${exeBox}
+        <p class="muted">Port não verificado pelo RecompHUB: os arquivos do jogo seguem o README do projeto.</p>
+        ${shortcutsRow(g)}
+        ${g.status !== 'needs_exe' && !choices ? '<div class="row"><button class="ghost" data-act="exe-list">Trocar o programa do botão Jogar</button></div>' : ''}
+        ${manageRow(g)}
+        ${tagsBox(g)}
+        ${launchBox(g)}
+        <div class="row">
+          <button class="ghost" data-act="folder">Abrir pasta do port</button>
+          <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
+          ${g.installed_by_hub ? '<button class="ghost danger" data-act="uninstall">Desinstalar</button>' : ''}
+          <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
+        </div>
+        <p class="muted">Desinstalar apaga a pasta do port, mas guarda saves, save, savedata, user e config para a próxima instalação. ${esc(g.install_dir || '')}</p>
+      </div>
+    </div>`;
+}
 
 // ---- Modo TV: full-screen library for a controller (Gamepad API) or the keyboard ----
 

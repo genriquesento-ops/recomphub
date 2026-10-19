@@ -52,6 +52,24 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
 12. **Explicar, não só recusar.** Uma ROM errada é identificada pelo cabeçalho (jogo, região,
     revisão) e a mensagem diz o que é e o que falta.
 
+## Aba Comunidade
+
+14. **Duas camadas: verificado e comunidade.** O catálogo (`catalog.json`) continua sendo a
+    única fonte com conferência de arquivos. A aba Comunidade mostra ports puxados ao vivo da
+    lista `Sebastrion/awesome-unofficial-pc-ports` (MIT) e dos tópicos `pc-port` e `n64recomp`
+    do GitHub, sempre com o aviso "não verificado". Um port que já está no catálogo aparece
+    marcado e leva à versão verificada.
+15. **Cache de 12 horas.** Sem login, o GitHub permite 10 buscas por minuto e 60 chamadas por
+    hora; a lista fica em `community.json` e só as páginas de release são consultadas na hora,
+    uma por port aberto.
+16. **Instalação experimental só da página de releases do projeto.** O endereço do .zip é
+    buscado de novo no GitHub (nunca vem da página) e precisa começar com
+    `https://github.com/<repo>/releases/download/`. Só repositórios que estão na lista da
+    Comunidade (ou já instalados por ela) são aceitos. Só `.zip` de Windows; se o projeto não
+    tem um, a página manda para o README. O RecompHUB nunca procura nem baixa arquivos de jogos.
+17. **Programa escolhido pelo jogador.** Depois de instalar, os `.exe` da pasta são listados; com
+    um só, ele vira o botão Jogar; com vários, o jogador escolhe ("Escolher programa").
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

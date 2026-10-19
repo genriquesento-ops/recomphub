@@ -10,6 +10,7 @@
 - [x] **v0.6** Fase 2: escolher versão, aviso por port, desinstalar guardando saves, backup em .zip, zerar tempo
 - [x] **v0.7** Fase 3: opções de inicialização, favoritos e ocultos, bandeja, Modo TV, aviso de versão do RecompHUB
 - [x] **v0.8** Fase 4: decisões de arquitetura, este arquivo, mais testes automáticos
+- [x] **v0.9** Aba Comunidade: ports da lista awesome-unofficial-pc-ports e dos tópicos do GitHub, instalação experimental com aviso, escolha do programa, atualização e desinstalação
 - [ ] Repositório público, para o catálogo remoto e o aviso de versão do RecompHUB funcionarem
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 - [ ] Conquistas (v2 do SPEC)

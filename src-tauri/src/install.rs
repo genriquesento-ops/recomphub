@@ -25,20 +25,33 @@ fn emit(app: &AppHandle, id: &str, stage: &str, done: u64, total: u64) {
 
 /// Downloads `release` into `target`, keeping the player's files listed in `keep_on_update`.
 pub async fn install(app: &AppHandle, game: &GameDef, release: &Release, target: &Path) -> Result<(), String> {
+    install_release(app, &game.id, release, target, &game.keep_on_update).await
+}
+
+/// The same for any release (community ports): `id` names the progress events and the
+/// temporary download, `keep` lists the player's files an update must not replace.
+pub async fn install_release(
+    app: &AppHandle,
+    id: &str,
+    release: &Release,
+    target: &Path,
+    keep: &[String],
+) -> Result<(), String> {
     std::fs::create_dir_all(target).map_err(|e| format!("Não consegui criar a pasta {}: {e}", target.display()))?;
     check_space(target, release.asset_size)?;
-    let zip_path = target.with_file_name(format!("{}.download.zip", game.id));
-    let result = download_and_extract(app, game, release, target, &zip_path).await;
+    let zip_path = target.with_file_name(format!("{id}.download.zip"));
+    let result = download_and_extract(app, id, release, target, &zip_path, keep).await;
     let _ = std::fs::remove_file(&zip_path);
     result
 }
 
 async fn download_and_extract(
     app: &AppHandle,
-    game: &GameDef,
+    id: &str,
     release: &Release,
     target: &Path,
     zip_path: &Path,
+    keep: &[String],
 ) -> Result<(), String> {
     let client = github::client();
     let resp = client
@@ -59,7 +72,7 @@ async fn download_and_extract(
         hasher.update(&chunk);
         done += chunk.len() as u64;
         if done - last_emit > 512 * 1024 || done == total {
-            emit(app, &game.id, "download", done, total);
+            emit(app, id, "download", done, total);
             last_emit = done;
         }
     }
@@ -67,7 +80,7 @@ async fn download_and_extract(
     drop(file);
 
     if let Some(url) = &release.sha256_url {
-        emit(app, &game.id, "verify", 0, 0);
+        emit(app, id, "verify", 0, 0);
         let expected = client
             .get(url)
             .send()
@@ -85,8 +98,8 @@ async fn download_and_extract(
     }
 
     let (app2, zip_path, target) = (app.clone(), zip_path.to_path_buf(), target.to_path_buf());
-    let keep = game.keep_on_update.clone();
-    let id = game.id.clone();
+    let keep = keep.to_vec();
+    let id = id.to_string();
     tauri::async_runtime::spawn_blocking(move || extract(&app2, &id, &zip_path, &target, &keep))
         .await
         .map_err(|e| e.to_string())?
@@ -118,8 +131,12 @@ fn extract(app: &AppHandle, id: &str, zip_path: &Path, target: &Path, keep: &[St
             std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
             continue;
         }
-        let rel_text = rel.to_string_lossy().replace('\\', "/");
-        let kept = keep.iter().any(|k| if k.ends_with('/') { rel_text.starts_with(k.as_str()) } else { rel_text == *k });
+        // Windows paths ignore case: "Saves/" is the same folder as "saves/".
+        let rel_text = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+        let kept = keep
+            .iter()
+            .map(|k| k.to_lowercase())
+            .any(|k| if k.ends_with('/') { rel_text.starts_with(&k) } else { rel_text == k });
         if kept && out.exists() {
             continue;
         }

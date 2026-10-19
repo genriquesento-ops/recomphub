@@ -90,7 +90,7 @@ pub async fn releases(game: &GameDef, max: usize) -> Result<Vec<Release>, String
 }
 
 /// "2026-10-18T06:10:15Z" to Unix time.
-fn parse_time(s: &str) -> Option<u64> {
+pub fn parse_time(s: &str) -> Option<u64> {
     let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
     let (y, m, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
     let (hh, mm, ss) = (n(11..13)?, n(14..16)?, n(17..19)?);

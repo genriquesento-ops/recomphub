@@ -14,6 +14,9 @@ pub enum EntryKind {
     /// Any other PC game the player added by pointing at its program. RecompHUB does not
     /// try to tell where it came from.
     PcGame,
+    /// A community port installed from its GitHub release without RecompHUB's checks
+    /// (aba Comunidade, instalação experimental).
+    Community,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -28,6 +31,9 @@ pub struct Entry {
     /// PC game only: the name the player sees.
     #[serde(default)]
     pub title: Option<String>,
+    /// Community port: GitHub "owner/name" it was installed from.
+    #[serde(default)]
+    pub repo: Option<String>,
     /// The player's own labels, for filtering the library.
     #[serde(default)]
     pub tags: Vec<String>,
@@ -102,6 +108,20 @@ impl Library {
         entry.exe = exe.file_name().map(|n| n.to_string_lossy().to_string());
         entry.title = Some(title.to_string());
         entry.version = None;
+        self.games.insert(id.to_string(), entry);
+    }
+
+    pub fn add_community(&mut self, id: &str, dir: &Path, repo: &str, title: &str, tag: &str, exe: Option<String>) {
+        let mut entry = self.games.remove(id).or_else(|| self.removed.remove(id)).unwrap_or_default();
+        entry.kind = EntryKind::Community;
+        entry.install_dir = dir.display().to_string();
+        entry.repo = Some(repo.to_string());
+        entry.title = Some(title.to_string());
+        entry.version = Some(tag.to_string());
+        // An update keeps the program the player chose, when it still exists.
+        if entry.exe.as_ref().map(|e| !dir.join(e).is_file()).unwrap_or(true) {
+            entry.exe = exe;
+        }
         self.games.insert(id.to_string(), entry);
     }
 

@@ -1,5 +1,6 @@
 mod catalog;
 mod catalog_sync;
+mod community;
 mod covers;
 mod files;
 mod github;
@@ -41,6 +42,8 @@ pub struct AppState {
     pub pending_root: PathBuf,
     /// Dated .zip files from "Backup dos saves".
     pub backups_root: PathBuf,
+    /// Aba Comunidade cache (community.json).
+    pub community_path: PathBuf,
 }
 
 /// Everything the interface shows about one game.
@@ -51,9 +54,11 @@ struct GameView {
     kind: &'static str,
     title: String,
     family: &'static str,
-    port_name: &'static str,
-    port_authors: &'static str,
-    project_url: &'static str,
+    port_name: String,
+    port_authors: String,
+    project_url: String,
+    /// Community port: its GitHub repository.
+    repo: Option<String>,
     needs: &'static str,
     files_help: &'static str,
     files_kind: &'static str,
@@ -167,9 +172,10 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         kind: "port",
         title: game.title.to_string(),
         family: game.family.as_str(),
-        port_name: game.port_name.as_str(),
-        port_authors: game.port_authors.as_str(),
-        project_url: game.project_url.as_str(),
+        port_name: game.port_name.clone(),
+        port_authors: game.port_authors.clone(),
+        project_url: game.project_url.clone(),
+        repo: None,
         needs: game.needs.as_str(),
         files_help: game.files_help.as_str(),
         files_kind: game.files_kind(),
@@ -207,25 +213,35 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         let s = state.sessions.lock().unwrap();
         (s.is_running(id), s.is_launching(id), s.started(id))
     };
+    let community = entry.kind == library::EntryKind::Community;
+    let installing = state.installing.lock().unwrap().contains(id);
     let exe = pc_exe(entry);
     let (cover, cover_source) = pick_cover(state, id, None);
-    let status = if running {
+    let status = if installing {
+        "installing"
+    } else if running {
         "running"
     } else if launching {
         "starting"
     } else if exe.as_deref().map(Path::is_file).unwrap_or(false) {
         "ready"
+    } else if community && entry.exe.is_none() {
+        "needs_exe"
     } else {
         "missing"
     };
+    let repo = entry.repo.clone().filter(|_| community);
+    let latest = repo.as_ref().and_then(|_| state.latest.lock().unwrap().get(id).map(|r| r.tag.clone()));
+    let installed_by_hub = community && Path::new(&entry.install_dir).starts_with(&state.games_root);
     GameView {
         id: id.to_string(),
-        kind: "pc_game",
+        kind: if community { "community" } else { "pc_game" },
         title: entry.title.clone().unwrap_or_else(|| "Jogo sem nome".into()),
-        family: "PC",
-        port_name: "",
-        port_authors: "",
-        project_url: "",
+        family: if community { "Comunidade" } else { "PC" },
+        port_name: repo.as_ref().and_then(|r| r.split('/').nth(1)).unwrap_or("").to_string(),
+        port_authors: repo.as_ref().and_then(|r| r.split('/').next()).unwrap_or("").to_string(),
+        project_url: repo.as_ref().map(|r| format!("https://github.com/{r}")).unwrap_or_default(),
+        repo: repo.clone(),
         needs: "",
         files_help: "",
         files_kind: "",
@@ -237,19 +253,22 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         status,
         session_started,
         in_library: true,
-        install_dir: exe.map(|p| p.display().to_string()),
-        version: None,
-        latest_version: None,
-        update_available: false,
+        install_dir: if community { Some(entry.install_dir.clone()) } else { exe.map(|p| p.display().to_string()) },
+        version: entry.version.clone().filter(|_| community),
+        update_available: !entry.ignore_updates
+            && latest.is_some()
+            && latest != entry.version
+            && !matches!(status, "installing" | "running" | "starting"),
+        latest_version: latest,
         files: None,
         total_seconds: entry.total_seconds,
         last_played: entry.last_played,
         cover,
         cover_source,
         icon: covers::find(&state.covers.icons, id).and_then(|p| data_url(&p)),
-        ignore_updates: false,
-        installed_by_hub: false,
-        pending_saves: false,
+        ignore_updates: entry.ignore_updates,
+        installed_by_hub,
+        pending_saves: state.pending_root.join(id).is_dir(),
         favorite: entry.favorite,
         hidden: entry.hidden,
         launch_args: entry.launch_args.clone(),
@@ -268,7 +287,7 @@ fn view_any(state: &AppState, id: &str) -> Result<GameView, String> {
     }
     let entry = state.library.lock().unwrap().games.get(id).cloned();
     match entry {
-        Some(e) if e.kind == library::EntryKind::PcGame => Ok(view_pc(state, id, &e)),
+        Some(e) if e.kind != library::EntryKind::Port => Ok(view_pc(state, id, &e)),
         _ => Err("Este jogo não está mais na biblioteca.".into()),
     }
 }
@@ -291,7 +310,7 @@ fn get_library(app: AppHandle) -> Vec<GameView> {
         .unwrap()
         .games
         .iter()
-        .filter(|(_, e)| e.kind == library::EntryKind::PcGame)
+        .filter(|(_, e)| e.kind != library::EntryKind::Port)
         .map(|(id, e)| (id.clone(), e.clone()))
         .collect();
     let mut pc: Vec<GameView> = pc.iter().map(|(id, e)| view_pc(&state, id, e)).collect();
@@ -371,7 +390,7 @@ fn rename_game(app: AppHandle, id: String, title: String) -> Result<GameView, St
     let state = app.state::<AppState>();
     {
         let mut lib = state.library.lock().unwrap();
-        let entry = lib.games.get_mut(&id).filter(|e| e.kind == library::EntryKind::PcGame);
+        let entry = lib.games.get_mut(&id).filter(|e| e.kind != library::EntryKind::Port);
         entry.ok_or("Só jogos adicionados por você podem ser renomeados.")?.title = Some(title);
     }
     save(&state)?;
@@ -480,8 +499,15 @@ fn set_cover_templates(app: AppHandle, lines: Vec<String>) -> Result<Vec<String>
 
 #[tauri::command]
 fn open_link(app: AppHandle, url: String) -> Result<(), String> {
-    // Only pages the catalog lists: never an address from elsewhere.
-    let known = catalog::games().iter().any(|g| g.links().any(|l| l == url));
+    // Only pages the catalog lists, the community list and the GitHub pages of the
+    // community ports it shows: never an address from elsewhere.
+    let state = app.state::<AppState>();
+    let known = catalog::games().iter().any(|g| g.links().any(|l| l == url))
+        || url == community::LIST_PAGE
+        || url
+            .strip_prefix("https://github.com/")
+            .map(|repo| known_community_repo(&state, repo))
+            .unwrap_or(false);
     if !known {
         return Err("Link fora do catálogo.".into());
     }
@@ -498,6 +524,23 @@ async fn check_updates(app: AppHandle) -> Vec<GameView> {
     for game in catalog::games() {
         if let Ok(release) = github::latest(game).await {
             app.state::<AppState>().latest.lock().unwrap().insert(game.id.to_string(), release);
+        }
+    }
+    // Community ports in the library: one GitHub call each.
+    let community_ports: Vec<(String, String)> = app
+        .state::<AppState>()
+        .library
+        .lock()
+        .unwrap()
+        .games
+        .iter()
+        .filter(|(_, e)| e.kind == library::EntryKind::Community)
+        .filter_map(|(id, e)| Some((id.clone(), e.repo.clone()?)))
+        .collect();
+    for (id, repo) in community_ports {
+        if let Ok(Some(r)) = community::latest_release(&repo).await {
+            let release = github::Release { tag: r.tag, published: r.published, asset_url: String::new(), asset_size: 0, sha256_url: None };
+            app.state::<AppState>().latest.lock().unwrap().insert(id, release);
         }
     }
     get_library(app)
@@ -709,6 +752,147 @@ fn open_app_update(app: AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+// ---- Aba Comunidade ----
+
+#[derive(Serialize)]
+struct CommunityItemView {
+    #[serde(flatten)]
+    item: community::Item,
+    /// Same project in RecompHUB's verified catalog: its id.
+    catalog_id: Option<String>,
+    /// Already in the library as a community port: its id.
+    installed_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CommunityView {
+    items: Vec<CommunityItemView>,
+    fetched_at: u64,
+    errors: Vec<String>,
+    list_page: &'static str,
+}
+
+/// The catalog port for a repository, also when the project moved (same repository name).
+fn catalog_for_repo(repo: &str) -> Option<&'static GameDef> {
+    let name = |r: &str| r.split('/').nth(1).unwrap_or("").to_lowercase();
+    catalog::games()
+        .iter()
+        .find(|g| g.repo.eq_ignore_ascii_case(repo))
+        .or_else(|| catalog::games().iter().find(|g| name(&g.repo) == name(repo)))
+}
+
+#[tauri::command]
+async fn get_community(app: AppHandle, force: bool) -> CommunityView {
+    let path = app.state::<AppState>().community_path.clone();
+    let cache = community::refresh(&path, force).await;
+    let state = app.state::<AppState>();
+    let lib = state.library.lock().unwrap();
+    let items = cache
+        .items
+        .into_iter()
+        .map(|item| {
+            let id = community::id_for(&item.repo);
+            CommunityItemView {
+                catalog_id: catalog_for_repo(&item.repo).map(|g| g.id.clone()),
+                installed_id: lib.games.contains_key(&id).then_some(id),
+                item,
+            }
+        })
+        .collect();
+    CommunityView { items, fetched_at: cache.fetched_at, errors: cache.errors, list_page: community::LIST_PAGE }
+}
+
+/// A repository the page may act on: listed in the Comunidade cache or installed from it.
+fn known_community_repo(state: &AppState, repo: &str) -> bool {
+    community::valid_repo(repo)
+        && (community::load(&state.community_path).items.iter().any(|i| i.repo.eq_ignore_ascii_case(repo))
+            || state.library.lock().unwrap().games.values().any(|e| e.repo.as_deref() == Some(repo)))
+}
+
+#[tauri::command]
+async fn community_release(app: AppHandle, repo: String) -> Result<Option<community::CommunityRelease>, String> {
+    if !known_community_repo(&app.state::<AppState>(), &repo) {
+        return Err("Port fora da lista da Comunidade.".into());
+    }
+    community::latest_release(&repo).await
+}
+
+/// Files kept when a community port is updated or uninstalled (common save/config places).
+// Windows folder names ignore case, so one spelling each.
+const COMMUNITY_KEEP: &[&str] = &["portable.txt", "saves/", "save/", "savedata/", "user/", "config/"];
+
+/// "Instalar (experimental)": a community port's Windows .zip from its latest release.
+/// `asset` None picks the most likely Windows file (used by "Atualizar").
+#[tauri::command]
+async fn install_community(app: AppHandle, repo: String, asset: Option<String>, title: String) -> Result<GameView, String> {
+    if !known_community_repo(&app.state::<AppState>(), &repo) {
+        return Err("Port fora da lista da Comunidade.".into());
+    }
+    let id = community::id_for(&repo);
+    {
+        let state = app.state::<AppState>();
+        let s = state.sessions.lock().unwrap();
+        if s.is_running(&id) || s.is_launching(&id) {
+            return Err("Feche o jogo antes de atualizar.".into());
+        }
+        drop(s);
+        if !state.installing.lock().unwrap().insert(id.clone()) {
+            return Err("A instalação já está em andamento.".into());
+        }
+    }
+    let result = install_community_inner(&app, &id, &repo, asset, &title).await;
+    let state = app.state::<AppState>();
+    state.installing.lock().unwrap().remove(&id);
+    result?;
+    tray::refresh(&app);
+    view_any(&state, &id)
+}
+
+async fn install_community_inner(app: &AppHandle, id: &str, repo: &str, asset: Option<String>, title: &str) -> Result<(), String> {
+    let asset = match asset {
+        Some(a) => a,
+        None => community::latest_release(repo)
+            .await?
+            .and_then(|r| r.assets.into_iter().next())
+            .map(|a| a.name)
+            .ok_or("Este port não tem mais uma versão para Windows.")?,
+    };
+    let release = community::release_for(repo, &asset).await?;
+    let state = app.state::<AppState>();
+    let target = state.games_root.join("community").join(id);
+    let keep: Vec<String> = COMMUNITY_KEEP.iter().map(|s| s.to_string()).collect();
+    install::install_release(app, id, &release, &target, &keep).await?;
+    saves::restore(&state.pending_root.join(id), &target)?;
+    let exes = community::find_executables(&target);
+    if exes.is_empty() {
+        return Err("O arquivo baixado não tem nenhum programa (.exe). Talvez este port precise ser compilado: veja a página do projeto.".into());
+    }
+    let exe = (exes.len() == 1).then(|| exes[0].clone());
+    let title = if title.trim().is_empty() { repo.split('/').nth(1).unwrap_or(repo) } else { title.trim() };
+    {
+        let mut lib = state.library.lock().unwrap();
+        lib.add_community(id, &target, repo, title, &release.tag, exe);
+    }
+    state.latest.lock().unwrap().insert(id.to_string(), release);
+    save(&state)
+}
+
+/// Programs a community port's Play button can start ("Escolher programa").
+#[tauri::command]
+fn list_executables(app: AppHandle, id: String) -> Result<Vec<String>, String> {
+    let dir = app.state::<AppState>().library.lock().unwrap().install_dir(&id).ok_or("Jogo fora da biblioteca.")?;
+    Ok(community::find_executables(&dir))
+}
+
+#[tauri::command]
+fn set_executable(app: AppHandle, id: String, exe: String) -> Result<GameView, String> {
+    let dir = app.state::<AppState>().library.lock().unwrap().install_dir(&id).ok_or("Jogo fora da biblioteca.")?;
+    if !community::valid_exe(&dir, &exe) {
+        return Err("Escolha um programa .exe de dentro da pasta do port.".into());
+    }
+    update_entry(&app, &id, |e| e.exe = Some(exe))
+}
+
 #[derive(Serialize)]
 struct VersionInfo {
     tag: String,
@@ -752,7 +936,7 @@ fn reset_playtime(app: AppHandle, id: String) -> Result<GameView, String> {
 /// A port added from the player's own folder is never deleted.
 #[tauri::command]
 fn uninstall_game(app: AppHandle, id: String) -> Result<Vec<String>, String> {
-    let game = game_or_err(&id)?;
+    let game = catalog::get(&id);
     let state = app.state::<AppState>();
     let entry = state.library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
     let dir = PathBuf::from(&entry.install_dir);
@@ -768,7 +952,13 @@ fn uninstall_game(app: AppHandle, id: String) -> Result<Vec<String>, String> {
     if state.installing.lock().unwrap().contains(&id) {
         return Err("Espere a instalação terminar.".into());
     }
-    let owned = saves::owned_paths(&dir, &game.keep_on_update, files::save_dir(game, &dir).as_deref());
+    let owned = match game {
+        Some(game) => saves::owned_paths(&dir, &game.keep_on_update, files::save_dir(game, &dir).as_deref()),
+        None => {
+            let keep: Vec<String> = COMMUNITY_KEEP.iter().map(|s| s.to_string()).collect();
+            saves::owned_paths(&dir, &keep, None)
+        }
+    };
     let kept = saves::preserve(&dir, &owned, &state.pending_root.join(&id))?;
     std::fs::remove_dir_all(&dir).map_err(|e| format!("Não consegui apagar {}: {e}", dir.display()))?;
     state.library.lock().unwrap().remove(&id);
@@ -989,6 +1179,7 @@ pub fn run() {
                 games_root: local.join("games"),
                 pending_root: local.join("saves-pendentes"),
                 backups_root: dir.join("Backups de saves"),
+                community_path: dir.join("community.json"),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
@@ -1018,6 +1209,11 @@ pub fn run() {
             set_tags,
             open_link,
             list_versions,
+            get_community,
+            community_release,
+            install_community,
+            list_executables,
+            set_executable,
             set_ignore_updates,
             reset_playtime,
             uninstall_game,
