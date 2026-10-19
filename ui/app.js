@@ -77,8 +77,12 @@ function coverHtml(g) {
   return `<div class="cover${contain}"><img src="${g.cover}" alt=""></div>`;
 }
 
+let settings = { close_to_tray: true, show_hidden: false, version: '' };
+
 function chips(g) {
-  let html = `<span class="chip family">${esc(g.family)}</span>`;
+  let html = g.favorite ? '<span class="chip fav" title="Favorito">★</span>' : '';
+  html += `<span class="chip family">${esc(g.family)}</span>`;
+  if (g.hidden) html += '<span class="chip family">Oculto</span>';
   html += `<span class="chip ${g.status}">${STATUS_TEXT[g.status]}</span>`;
   if (g.update_available) html += `<span class="chip update">Atualização</span>`;
   return html;
@@ -88,7 +92,16 @@ function chips(g) {
 function inTab(g) {
   if (tab === 'discover') return g.kind === 'port' && !g.in_library;
   if (!g.in_library) return false;
+  if (g.hidden && !settings.show_hidden) return false;
   return tab === 'all' || g.kind === tab;
+}
+
+// Favorites first, then the most recently played (as Ports Launcher), then by name.
+function libraryOrder(a, b) {
+  if (tab === 'discover') return a.title.localeCompare(b.title, 'pt-BR');
+  return (b.favorite - a.favorite)
+    || ((b.last_played || 0) - (a.last_played || 0))
+    || a.title.localeCompare(b.title, 'pt-BR');
 }
 
 const tagsOf = (g) => (tab === 'discover' ? g.catalog_tags : g.tags);
@@ -100,7 +113,9 @@ function matchesSearch(g) {
 }
 
 function visibleGames() {
-  return games.filter((g) => inTab(g) && matchesSearch(g) && (!tagFilter || tagsOf(g).includes(tagFilter)));
+  return games
+    .filter((g) => inTab(g) && matchesSearch(g) && (!tagFilter || tagsOf(g).includes(tagFilter)))
+    .sort(libraryOrder);
 }
 
 function renderTabs() {
@@ -242,7 +257,9 @@ function renderPcDetail(g) {
             <button data-act="rename">Renomear</button>
           </div>
         </div>
+        ${manageRow(g)}
         ${tagsBox(g)}
+        ${launchBox(g)}
         <div class="row">
           <button class="ghost" data-act="folder">Abrir pasta do jogo</button>
           <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
@@ -330,8 +347,52 @@ async function openCovers() {
   render();
 }
 
+function launchBox(g) {
+  if (!g.in_library) return '';
+  const env = g.env.map((v) => `${v.name}=${v.value}`).join('\n');
+  return `
+    <details class="box" ${g.launch_args || g.env.length ? 'open' : ''}>
+      <summary><h3>Opções de inicialização</h3></summary>
+      <p class="muted">Para usuários avançados. Valem quando o jogo é aberto pelo RecompHUB (botão Jogar, atalhos e bandeja).</p>
+      <p><b>Argumentos</b></p>
+      <input type="text" id="launch-args" class="wide" value="${esc(g.launch_args)}" placeholder='Ex.: --fullscreen  ou  --rom "C:\\Meus jogos\\rom.z64"'>
+      <p><b>Variáveis de ambiente</b> (uma por linha, NOME=valor)</p>
+      <textarea id="launch-env" spellcheck="false" placeholder="DXVK_HUD=fps">${esc(env)}</textarea>
+      <div class="row"><button data-act="launch-save">Salvar opções</button></div>
+    </details>`;
+}
+
+function manageRow(g) {
+  if (!g.in_library) return '';
+  return `
+    <div class="row">
+      <button class="ghost" data-act="favorite">${g.favorite ? '★ Tirar dos favoritos' : '☆ Favoritar'}</button>
+      <button class="ghost" data-act="hide">${g.hidden ? 'Mostrar na biblioteca' : 'Ocultar da biblioteca'}</button>
+    </div>`;
+}
+
+function renderSettings() {
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="back">← Biblioteca</button>
+    <div class="covers-page">
+      <h2>Configurações</h2>
+      <div class="box">
+        <label class="check"><input type="checkbox" id="set-tray" ${settings.close_to_tray ? 'checked' : ''}>
+          Fechar para a bandeja: ao fechar a janela, o RecompHUB continua perto do relógio e segue contando o tempo de jogo.
+          Para sair de vez, use "Sair" no ícone da bandeja.</label>
+        <label class="check"><input type="checkbox" id="set-hidden" ${settings.show_hidden ? 'checked' : ''}>
+          Mostrar jogos ocultos na biblioteca.</label>
+        <div class="row"><button data-act="settings-save">Salvar</button></div>
+      </div>
+      <p class="muted">RecompHUB versão ${esc(settings.version)}.</p>
+    </div>`;
+  document.querySelectorAll('#detail [data-act]').forEach((el) =>
+    el.addEventListener('click', () => act(el.dataset.act, null, el)));
+}
+
 function renderDetail() {
   if (openId === '__covers') return renderCovers();
+  if (openId === '__settings') return renderSettings();
   const g = games.find((x) => x.id === openId);
   if (!g) {
     openId = null;
@@ -408,7 +469,9 @@ function renderPortDetail(g) {
     main += filesBox(g);
     main += shortcutsRow(g);
     main += versionBox(g);
+    main += manageRow(g);
     main += tagsBox(g);
+    main += launchBox(g);
   }
 
   $('#detail').innerHTML = `
@@ -447,6 +510,7 @@ function render() {
   $('#detail').hidden = !inDetail;
   if (inDetail) renderDetail();
   else renderGrid();
+  if (tvOn) renderTv();
 }
 
 function setGame(g) {
@@ -568,6 +632,29 @@ async function act(action, g, el) {
       await call('remove_game', { id: g.id });
       await refresh();
       break;
+    case 'favorite':
+      setGame(await call('set_favorite', { id: g.id, favorite: !g.favorite }));
+      break;
+    case 'hide':
+      setGame(await call('set_hidden', { id: g.id, hidden: !g.hidden }));
+      if (!g.hidden && !settings.show_hidden) toast(`${g.title} foi ocultado. Para ver ocultos, use Configurações.`);
+      break;
+    case 'launch-save': {
+      const env = $('#launch-env').value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+        const i = l.indexOf('=');
+        return i < 0 ? { name: l, value: '' } : { name: l.slice(0, i), value: l.slice(i + 1) };
+      });
+      setGame(await call('set_launch_options', { id: g.id, args: $('#launch-args').value, env }));
+      toast('Opções de inicialização salvas.');
+      break;
+    }
+    case 'settings-save':
+      settings = await call('set_settings', {
+        closeToTray: $('#set-tray').checked,
+        showHidden: $('#set-hidden').checked,
+      });
+      toast('Configurações salvas.');
+      break;
     case 'versions':
       versions[g.id] = 'loading';
       render();
@@ -675,6 +762,153 @@ listen('session', async (e) => {
 });
 
 listen('open-game', (e) => openGame(e.payload));
+listen('notify', (e) => toast(String(e.payload), true));
+
+// ---- Modo TV: full-screen library for a controller (Gamepad API) or the keyboard ----
+
+let tvOn = false;
+let tvSel = 0;
+let tvPad = { held: {}, nextAt: 0 };
+
+function tvGames() {
+  return games
+    .filter((g) => g.in_library && !g.hidden && !['not_installed', 'missing'].includes(g.status))
+    .sort((a, b) => (b.favorite - a.favorite) || ((b.last_played || 0) - (a.last_played || 0)) || a.title.localeCompare(b.title, 'pt-BR'));
+}
+
+function renderTv() {
+  const list = tvGames();
+  tvSel = Math.max(0, Math.min(tvSel, list.length - 1));
+  $('#tv').innerHTML = `
+    <h1>Recomp<span style="color:var(--accent)">HUB</span></h1>
+    ${list.length ? '' : '<p class="muted">Nenhum jogo instalado ainda. Saia do Modo TV para instalar.</p>'}
+    <div class="tv-grid">${list.map((g, i) => `
+      <div class="card${i === tvSel ? ' sel' : ''}" data-i="${i}">
+        ${coverHtml(g)}
+        <div class="body">
+          <div class="title">${esc(g.title)}</div>
+          <div>${chips(g)}</div>
+          <div class="meta">${g.status === 'running' ? `Jogando há ${sessionLength(g)}` : playTime(g.total_seconds)}</div>
+        </div>
+      </div>`).join('')}</div>
+    <div class="hints"><span><b>A</b> / <b>Enter</b> Jogar</span><span><b>B</b> / <b>Esc</b> Sair do Modo TV</span><span><b>Direcional</b> / <b>setas</b> Escolher</span></div>`;
+  document.querySelectorAll('#tv .card').forEach((el) => {
+    el.addEventListener('mouseenter', () => { tvSel = Number(el.dataset.i); tvHighlight(); });
+    el.addEventListener('click', () => { tvSel = Number(el.dataset.i); tvPlay(); });
+  });
+  tvHighlight();
+}
+
+function tvHighlight() {
+  document.querySelectorAll('#tv .card').forEach((el) => el.classList.toggle('sel', Number(el.dataset.i) === tvSel));
+  const sel = document.querySelector('#tv .card.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function tvColumns() {
+  const cards = [...document.querySelectorAll('#tv .card')];
+  if (cards.length < 2) return 1;
+  const top = cards[0].offsetTop;
+  const n = cards.findIndex((c) => c.offsetTop !== top);
+  return n < 0 ? cards.length : n;
+}
+
+function tvMove(dx, dy) {
+  const n = tvGames().length;
+  if (!n) return;
+  tvSel = Math.max(0, Math.min(n - 1, tvSel + dx + dy * tvColumns()));
+  tvHighlight();
+}
+
+async function tvPlay() {
+  const g = tvGames()[tvSel];
+  if (!g) return;
+  if (g.status !== 'ready') {
+    toast(g.status === 'running' ? `${g.title} já está aberto.` : `${g.title}: ${STATUS_TEXT[g.status]}. Saia do Modo TV para resolver.`, true);
+    return;
+  }
+  try {
+    await invoke('play', { id: g.id });
+    setGame(await invoke('get_game', { id: g.id }));
+    renderTv();
+  } catch (e) {
+    toast(String(e), true);
+  }
+}
+
+async function tvOpen() {
+  tvOn = true;
+  tvSel = 0;
+  $('#tv').hidden = false;
+  renderTv();
+  try { await invoke('set_fullscreen', { on: true }); } catch { /* windowed is fine */ }
+  requestAnimationFrame(tvPoll);
+}
+
+async function tvClose() {
+  tvOn = false;
+  $('#tv').hidden = true;
+  try { await invoke('set_fullscreen', { on: false }); } catch { /* ignore */ }
+}
+
+// Standard gamepad mapping: 0 A, 1 B, 12-15 d-pad; left stick on axes 0/1.
+function tvPoll(t) {
+  if (!tvOn) return;
+  const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
+  if (pad) {
+    const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
+    const ax = pad.axes[0] || 0;
+    const ay = pad.axes[1] || 0;
+    const dir = {
+      left: b(14) || ax < -0.5, right: b(15) || ax > 0.5,
+      up: b(12) || ay < -0.5, down: b(13) || ay > 0.5,
+    };
+    const press = (name, now) => {
+      const was = tvPad.held[name];
+      tvPad.held[name] = now;
+      return now && !was;
+    };
+    if (press('a', b(0))) tvPlay();
+    if (press('b', b(1))) tvClose();
+    const any = dir.left || dir.right || dir.up || dir.down;
+    // First move at once, then repeat while held.
+    if (any && (press('dir', true) || t >= tvPad.nextAt)) {
+      tvMove(dir.right - dir.left, dir.down - dir.up);
+      tvPad.nextAt = t + (tvPad.repeating ? 120 : 380);
+      tvPad.repeating = true;
+    } else if (!any) {
+      tvPad.held.dir = false;
+      tvPad.repeating = false;
+    }
+  }
+  requestAnimationFrame(tvPoll);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!tvOn) return;
+  const keys = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  if (keys[e.key]) { tvMove(...keys[e.key]); e.preventDefault(); }
+  else if (e.key === 'Enter') { tvPlay(); e.preventDefault(); }
+  else if (e.key === 'Escape') { tvClose(); e.preventDefault(); }
+});
+
+$('#btn-tv').addEventListener('click', tvOpen);
+$('#btn-settings').addEventListener('click', async () => {
+  settings = await call('get_settings');
+  openId = '__settings';
+  render();
+});
+
+async function checkAppUpdate() {
+  try {
+    const u = await invoke('check_app_update');
+    if (!u) return;
+    const bar = $('#app-update');
+    bar.innerHTML = `<span>Versão nova do RecompHUB: <b>${esc(u.version)}</b></span><button class="primary">Baixar</button>`;
+    bar.hidden = false;
+    bar.querySelector('button').addEventListener('click', () => call('open_app_update', { url: u.url }));
+  } catch { /* offline */ }
+}
 
 // Keeps "Jogando há …" current.
 setInterval(() => {
@@ -683,6 +917,9 @@ setInterval(() => {
 }, 20000);
 
 // Show the library at once, then ask GitHub for new versions in the background.
+invoke('get_settings').then((s) => { settings = s; render(); }).catch(() => {});
+checkAppUpdate();
+
 refresh()
   .then(async () => {
     const pending = await invoke('take_pending_open');

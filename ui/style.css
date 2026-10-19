@@ -142,6 +142,37 @@ code { font: 12px Consolas, "Cascadia Mono", monospace; background: var(--panel-
 .versions button { font-size: 12px; padding: 5px 10px; }
 .topbar .actions { flex-wrap: wrap; justify-content: flex-end; }
 
+.chip.fav { color: var(--accent); }
+input.wide { width: 100%; }
+details.box summary { cursor: pointer; list-style: none; }
+details.box summary h3 { display: inline; }
+details.box summary::before { content: "▸ "; color: var(--muted); }
+details.box[open] summary::before { content: "▾ "; }
+label.check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
+label.check input { margin-top: 3px; }
+
+.app-update {
+  display: flex; gap: 12px; align-items: center; justify-content: center;
+  padding: 8px 16px; background: rgba(106, 167, 255, .12); border-bottom: 1px solid var(--line);
+}
+
+/* Modo TV: the library in full screen, for a controller or the keyboard */
+.tv {
+  position: fixed; inset: 0; z-index: 10; overflow: auto;
+  background: radial-gradient(ellipse at top, #1d2230, #0b0d11 70%);
+  padding: 40px 56px 90px;
+}
+.tv h1 { font-size: 34px; margin-bottom: 24px; }
+.tv .tv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 26px; }
+.tv .card { cursor: default; transition: transform .1s, box-shadow .1s, border-color .1s; }
+.tv .card.sel { transform: scale(1.06); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent), 0 18px 40px rgba(0, 0, 0, .5); }
+.tv .card .title { font-size: 17px; }
+.tv .hints {
+  position: fixed; left: 0; right: 0; bottom: 0; padding: 14px 56px;
+  display: flex; gap: 28px; color: var(--muted); background: rgba(11, 13, 17, .9); border-top: 1px solid var(--line);
+}
+.tv .hints b { color: var(--text); }
+
 /* Game page */
 .back { margin-bottom: 16px; }
 .detail { display: grid; grid-template-columns: 280px 1fr; gap: 28px; align-items: start; }

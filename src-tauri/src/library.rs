@@ -43,6 +43,24 @@ pub struct Entry {
     /// the player picks an older version, so it is not swapped back behind their back.
     #[serde(default)]
     pub ignore_updates: bool,
+    /// Shown first in the library.
+    #[serde(default)]
+    pub favorite: bool,
+    /// Left out of the library unless "Mostrar ocultos" is on.
+    #[serde(default)]
+    pub hidden: bool,
+    /// Extra command-line arguments for the game's program (as Heroic's launcherArgs).
+    #[serde(default)]
+    pub launch_args: String,
+    /// Extra environment variables for the game (as Heroic's enviromentOptions).
+    #[serde(default)]
+    pub env: Vec<EnvVar>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]

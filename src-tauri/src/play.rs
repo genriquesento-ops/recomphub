@@ -176,6 +176,9 @@ fn tick(app: &AppHandle, sys: &System) {
 
     let ended_ids: Vec<String> = ended.iter().map(|(id, _)| id.clone()).collect();
     credit(app, &credits, &ended_ids);
+    if !started.is_empty() || !ended.is_empty() {
+        crate::tray::refresh(app);
+    }
     for id in started {
         let _ = app.emit("session", serde_json::json!({ "id": id, "state": "running" }));
     }
@@ -190,15 +193,63 @@ pub fn flush(app: &AppHandle) {
     credit(app, &credits, &[]);
 }
 
-pub fn start(app: &AppHandle, id: &str, install_dir: &Path, exe: &str) -> Result<(), String> {
+/// Splits "--fullscreen --rom \"C:\\My Games\\x.z64\"" into arguments: spaces separate,
+/// double quotes group, and a quote is never passed on.
+pub fn split_args(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    let mut has = false;
+    for c in line.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                has = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if has {
+                    out.push(std::mem::take(&mut cur));
+                    has = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                has = true;
+            }
+        }
+    }
+    if has {
+        out.push(cur);
+    }
+    out
+}
+
+/// A name Windows accepts for an environment variable.
+pub fn valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && name.len() <= 64
+}
+
+pub fn start(
+    app: &AppHandle,
+    id: &str,
+    install_dir: &Path,
+    exe: &str,
+    args: &str,
+    env: &[crate::library::EnvVar],
+) -> Result<(), String> {
     let exe_path = install_dir.join(exe);
     if !exe_path.is_file() {
         return Err(format!("Não encontrei {} na pasta do jogo.", exe));
     }
-    std::process::Command::new(&exe_path)
-        .current_dir(install_dir)
-        .spawn()
-        .map_err(|e| format!("O Windows não abriu o jogo: {e}"))?;
+    let mut cmd = std::process::Command::new(&exe_path);
+    cmd.current_dir(install_dir).args(split_args(args));
+    for v in env.iter().filter(|v| valid_env_name(&v.name)) {
+        cmd.env(&v.name, &v.value);
+    }
+    cmd.spawn().map_err(|e| format!("O Windows não abriu o jogo: {e}"))?;
     app.state::<AppState>().sessions.lock().unwrap().launching.insert(id.to_string(), Instant::now());
     let _ = app.emit("session", serde_json::json!({ "id": id, "state": "starting" }));
     Ok(())
@@ -221,4 +272,26 @@ pub fn stop(install_dir: &Path) -> Result<usize, String> {
         return Err("O jogo não está aberto.".into());
     }
     Ok(closed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arguments_keep_quoted_paths_together() {
+        assert_eq!(split_args(""), Vec::<String>::new());
+        assert_eq!(split_args("  --a   -b "), vec!["--a", "-b"]);
+        assert_eq!(split_args(r#"--rom "C:\My Games\x.z64" -v"#), vec!["--rom", r"C:\My Games\x.z64", "-v"]);
+        assert_eq!(split_args(r#"--name """#), vec!["--name", ""]);
+    }
+
+    #[test]
+    fn environment_names() {
+        assert!(valid_env_name("DXVK_HUD"));
+        assert!(valid_env_name("_x1"));
+        assert!(!valid_env_name("1ABC"));
+        assert!(!valid_env_name("A=B"));
+        assert!(!valid_env_name(""));
+    }
 }

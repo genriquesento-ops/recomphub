@@ -8,6 +8,7 @@ mod library;
 mod play;
 mod saves;
 mod shortcut;
+mod tray;
 
 use base64::Engine;
 use serde::Serialize;
@@ -77,6 +78,10 @@ struct GameView {
     installed_by_hub: bool,
     /// Saves kept from an uninstall, waiting for the next install.
     pending_saves: bool,
+    favorite: bool,
+    hidden: bool,
+    launch_args: String,
+    env: Vec<library::EnvVar>,
     files: Option<FilesStatus>,
     total_seconds: u64,
     last_played: Option<u64>,
@@ -189,6 +194,10 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         ignore_updates: entry.as_ref().map(|e| e.ignore_updates).unwrap_or(false),
         installed_by_hub: entry.as_ref().map(|e| e.version.is_some() && Path::new(&e.install_dir).starts_with(&state.games_root)).unwrap_or(false),
         pending_saves: state.pending_root.join(&game.id).is_dir(),
+        favorite: entry.as_ref().map(|e| e.favorite).unwrap_or(false),
+        hidden: entry.as_ref().map(|e| e.hidden).unwrap_or(false),
+        launch_args: entry.as_ref().map(|e| e.launch_args.clone()).unwrap_or_default(),
+        env: entry.as_ref().map(|e| e.env.clone()).unwrap_or_default(),
     }
 }
 
@@ -241,6 +250,10 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         ignore_updates: false,
         installed_by_hub: false,
         pending_saves: false,
+        favorite: entry.favorite,
+        hidden: entry.hidden,
+        launch_args: entry.launch_args.clone(),
+        env: entry.env.clone(),
     }
 }
 
@@ -576,6 +589,126 @@ async fn install_inner(app: &AppHandle, game: &'static GameDef, tag: Option<Stri
     save(&state)
 }
 
+/// Changes one library entry and saves; the closure returns false to refuse.
+fn update_entry(app: &AppHandle, id: &str, f: impl FnOnce(&mut library::Entry)) -> Result<GameView, String> {
+    let state = app.state::<AppState>();
+    {
+        let mut lib = state.library.lock().unwrap();
+        f(lib.games.get_mut(id).ok_or("Adicione o jogo à biblioteca primeiro.")?);
+    }
+    save(&state)?;
+    tray::refresh(app);
+    view_any(&state, id)
+}
+
+#[tauri::command]
+fn set_favorite(app: AppHandle, id: String, favorite: bool) -> Result<GameView, String> {
+    update_entry(&app, &id, |e| e.favorite = favorite)
+}
+
+#[tauri::command]
+fn set_hidden(app: AppHandle, id: String, hidden: bool) -> Result<GameView, String> {
+    update_entry(&app, &id, |e| e.hidden = hidden)
+}
+
+/// "Opções de inicialização": arguments and environment variables for the game's program.
+#[tauri::command]
+fn set_launch_options(app: AppHandle, id: String, args: String, env: Vec<library::EnvVar>) -> Result<GameView, String> {
+    let args = args.trim().chars().take(1000).collect::<String>();
+    let mut clean: Vec<library::EnvVar> = Vec::new();
+    for v in env {
+        let name = v.name.trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        if !play::valid_env_name(&name) {
+            return Err(format!("\"{name}\" não é um nome de variável válido: use letras, números e _, sem começar com número."));
+        }
+        clean.retain(|c| !c.name.eq_ignore_ascii_case(&name));
+        clean.push(library::EnvVar { name, value: v.value.chars().take(2000).collect() });
+    }
+    clean.truncate(30);
+    update_entry(&app, &id, |e| {
+        e.launch_args = args;
+        e.env = clean;
+    })
+}
+
+#[derive(Serialize)]
+struct AppSettings {
+    close_to_tray: bool,
+    show_hidden: bool,
+    version: &'static str,
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle) -> AppSettings {
+    let s = app.state::<AppState>().settings.lock().unwrap().clone();
+    AppSettings { close_to_tray: s.close_to_tray, show_hidden: s.show_hidden, version: env!("CARGO_PKG_VERSION") }
+}
+
+#[tauri::command]
+fn set_settings(app: AppHandle, close_to_tray: bool, show_hidden: bool) -> Result<AppSettings, String> {
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.settings.lock().unwrap();
+        s.close_to_tray = close_to_tray;
+        s.show_hidden = show_hidden;
+        s.save(&state.settings_path)?;
+    }
+    Ok(get_settings(app))
+}
+
+/// "Modo tela cheia" (the Big Picture-style library).
+#[tauri::command]
+fn set_fullscreen(app: AppHandle, on: bool) -> Result<(), String> {
+    let w = app.get_webview_window("main").ok_or("Janela não encontrada.")?;
+    w.set_fullscreen(on).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct AppUpdate {
+    version: String,
+    url: String,
+}
+
+/// RecompHUB's own releases, as Ports Launcher checks its GitHub page. While the repository
+/// is private the API answers 404 and nothing is shown.
+#[tauri::command]
+async fn check_app_update() -> Option<AppUpdate> {
+    #[derive(serde::Deserialize)]
+    struct Rel {
+        tag_name: String,
+        html_url: String,
+    }
+    let resp = github::client()
+        .get(format!("https://api.github.com/repos/{APP_REPO}/releases/latest"))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .ok()?;
+    let rel: Rel = resp.error_for_status().ok()?.json().await.ok()?;
+    let newer = version_tuple(&rel.tag_name)? > version_tuple(env!("CARGO_PKG_VERSION"))?;
+    let page = format!("https://github.com/{APP_REPO}/releases/");
+    (newer && rel.html_url.starts_with(&page)).then(|| AppUpdate { version: rel.tag_name, url: rel.html_url })
+}
+
+const APP_REPO: &str = "genriquesento-ops/recomphub";
+
+/// "v0.7.0" → (0, 7, 0).
+fn version_tuple(v: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = v.trim_start_matches('v').split('.').map(|p| p.parse::<u32>().ok());
+    Some((parts.next()??, parts.next()??, parts.next().flatten().unwrap_or(0)))
+}
+
+#[tauri::command]
+fn open_app_update(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with(&format!("https://github.com/{APP_REPO}/releases/")) {
+        return Err("Link desconhecido.".into());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 struct VersionInfo {
     tag: String,
@@ -726,7 +859,7 @@ fn play(app: AppHandle, id: String) -> Result<(), String> {
         Some(game) => game.exe.to_string(),
         None => entry.exe.clone().ok_or("Jogo sem programa definido.")?,
     };
-    play::start(&app, &id, &dir, &exe)
+    play::start(&app, &id, &dir, &exe, &entry.launch_args, &entry.env)
 }
 
 #[tauri::command]
@@ -775,6 +908,16 @@ fn take_pending_open(app: AppHandle) -> Option<String> {
     app.state::<AppState>().pending_open.lock().unwrap().take()
 }
 
+/// A game chosen in the tray menu.
+pub fn play_from_tray(app: &AppHandle, id: &str) -> Result<(), String> {
+    play(app.clone(), id.to_string())
+}
+
+/// A message for the page's toast (from the tray or the background).
+pub fn notify(app: &AppHandle, message: &str) {
+    let _ = app.emit("notify", message);
+}
+
 /// "--play <id>" (from a shortcut): open that game if it is ready, else show its page.
 fn handle_args(app: &AppHandle, args: &[String]) {
     let Some(i) = args.iter().position(|a| a == "--play") else { return };
@@ -817,12 +960,19 @@ pub fn run() {
     tauri::Builder::default()
         // A shortcut opened while RecompHUB is running goes to the open window.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.set_focus();
-            }
+            tray::show_window(app);
             handle_args(app, &args);
         }))
+        // Closing the window keeps RecompHUB in the tray (setting "Fechar para a bandeja").
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let to_tray = window.app_handle().state::<AppState>().settings.lock().unwrap().close_to_tray;
+                if to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -847,6 +997,7 @@ pub fn run() {
                 pending_open: Mutex::new(None),
             });
             play::spawn_watcher(app.handle().clone());
+            tray::build(app.handle())?;
             let args: Vec<String> = std::env::args().collect();
             handle_args(app.handle(), &args);
             Ok(())
@@ -877,6 +1028,14 @@ pub fn run() {
             download_covers,
             get_cover_templates,
             set_cover_templates,
+            set_favorite,
+            set_hidden,
+            set_launch_options,
+            get_settings,
+            set_settings,
+            set_fullscreen,
+            check_app_update,
+            open_app_update,
             take_pending_open,
             remove_game,
             open_project,
@@ -889,4 +1048,15 @@ pub fn run() {
                 play::flush(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn versions_compare_by_number() {
+        assert_eq!(super::version_tuple("v0.10.2"), Some((0, 10, 2)));
+        assert_eq!(super::version_tuple("1.2"), Some((1, 2, 0)));
+        assert!(super::version_tuple("v0.10.0") > super::version_tuple("0.9.9"));
+        assert_eq!(super::version_tuple("latest"), None);
+    }
 }

@@ -16,11 +16,28 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp"];
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+/// RecompHUB's own settings (settings.json).
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Settings {
     /// The player's own cover addresses, one template per line, with ${serial} and ${title}.
     #[serde(default)]
     pub cover_templates: Vec<String>,
+    /// Closing the window keeps RecompHUB in the tray, timing games (as Ports Launcher).
+    #[serde(default = "yes")]
+    pub close_to_tray: bool,
+    /// Library shows hidden games too.
+    #[serde(default)]
+    pub show_hidden: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { cover_templates: Vec::new(), close_to_tray: true, show_hidden: false }
+    }
 }
 
 impl Settings {
