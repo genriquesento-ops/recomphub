@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "revision": 1,
+  "revision": 2,
   "ports": [
     {
       "id": "gow3",
@@ -29,7 +29,7 @@
         "update_dir_key": "update_dir",
         "user_dir_key": "user_dir"
       },
-      "saves": ["{install}\\user"],
+      "saves": ["{install}\\user\\savedata"],
       "cover_files": ["launcher/gow3.png"],
       "cover_urls": [],
       "guide": [

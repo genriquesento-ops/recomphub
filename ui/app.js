@@ -245,6 +245,7 @@ function renderPcDetail(g) {
         ${tagsBox(g)}
         <div class="row">
           <button class="ghost" data-act="folder">Abrir pasta do jogo</button>
+          <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
           <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
         </div>
         <p class="muted">Remover da biblioteca não apaga nenhum arquivo. ${esc(g.install_dir || '')}</p>
@@ -343,6 +344,37 @@ function renderDetail() {
     el.addEventListener('click', () => act(el.dataset.act, g, el)));
 }
 
+const versions = {};   // id -> 'loading' | [{tag, published, size}] while "Escolher versão" is open
+
+function versionBox(g) {
+  if (!g.installed_by_hub) return '';
+  const list = versions[g.id];
+  let picker = '';
+  if (list === 'loading') {
+    picker = '<p class="muted">Buscando as versões no GitHub do projeto…</p>';
+  } else if (Array.isArray(list)) {
+    picker = `
+      <ul class="versions">${list.map((v) => `
+        <li>
+          <span><b>${esc(versionLabel(v.tag))}</b> · ${new Date(v.published * 1000).toLocaleDateString('pt-BR')} · ${(v.size / 1048576).toFixed(0)} MB</span>
+          ${v.tag === g.version ? '<span class="muted">instalada</span>'
+            : `<button data-act="install" data-tag="${esc(v.tag)}" ${IN_GAME.includes(g.status) ? 'disabled' : ''}>Instalar esta</button>`}
+        </li>`).join('')}
+      </ul>
+      <p class="muted">Escolher uma versão mais antiga desliga o aviso de versão nova deste port. Saves e configurações são mantidos.</p>
+      <div class="row"><button class="ghost" data-act="versions-close">Fechar lista</button></div>`;
+  }
+  return `
+    <div class="box">
+      <h3>Versão do port</h3>
+      <div class="row">
+        ${list ? '' : '<button data-act="versions">Escolher versão</button>'}
+        <button class="ghost" data-act="ignore-updates">Avisar sobre versões novas: ${g.ignore_updates ? 'desligado' : 'ligado'}</button>
+      </div>
+      ${picker}
+    </div>`;
+}
+
 function renderPortDetail(g) {
   const latest = versionLabel(g.latest_version);
   const version = versionLabel(g.version) || (g.status !== 'not_installed' ? 'não identificada (adicionada de uma pasta)' : null);
@@ -356,6 +388,7 @@ function renderPortDetail(g) {
         <h3>Instalar</h3>
         <p>O RecompHUB baixa a versão mais recente do port na página oficial do projeto${latest ? ` (${esc(latest)})` : ''} e depois pede os arquivos da sua cópia.</p>
         <p class="muted">Requisitos: ${esc(g.requirements)}</p>
+        ${g.pending_saves ? '<p><b>Seus saves da instalação anterior estão guardados</b> e voltam para o lugar quando você instalar.</p>' : ''}
         <div class="row">
           <button class="primary" data-act="install">Instalar</button>
           <button data-act="add">Já tenho instalado: escolher a pasta</button>
@@ -374,6 +407,7 @@ function renderPortDetail(g) {
     main += playRow(g, 'o port');
     main += filesBox(g);
     main += shortcutsRow(g);
+    main += versionBox(g);
     main += tagsBox(g);
   }
 
@@ -395,9 +429,14 @@ function renderPortDetail(g) {
         ${g.in_library ? `
           <div class="row">
             <button class="ghost" data-act="folder">Abrir pasta do port</button>
+            <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
+            ${g.installed_by_hub ? '<button class="ghost danger" data-act="uninstall">Desinstalar</button>' : ''}
             <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
           </div>
-          <p class="muted">Remover da biblioteca não apaga nenhum arquivo. ${esc(g.install_dir || '')}</p>` : ''}
+          <p class="muted">${g.installed_by_hub
+            ? 'Desinstalar apaga a pasta do port, mas guarda seus saves e configurações para a próxima instalação. Remover da biblioteca não apaga nada.'
+            : 'Este port foi adicionado de uma pasta sua: o RecompHUB nunca apaga esses arquivos. Remover da biblioteca não apaga nada.'}
+            ${esc(g.install_dir || '')}</p>` : ''}
       </div>
     </div>`;
 }
@@ -482,12 +521,14 @@ async function act(action, g, el) {
       await addExisting();
       break;
     case 'install': {
+      const tag = el && el.dataset.tag ? el.dataset.tag : null;
       progress[g.id] = { stage: 'download', done: 0, total: 0 };
       g.status = 'installing';
+      delete versions[g.id];
       render();
       try {
-        setGame(await invoke('install_game', { id: g.id }));
-        toast(`${g.title} instalado.`);
+        setGame(await invoke('install_game', { id: g.id, tag }));
+        toast(tag ? `${g.title}: versão ${versionLabel(tag)} instalada.` : `${g.title} instalado.`);
       } catch (e) {
         toast(String(e), true);
         await refresh();
@@ -527,6 +568,51 @@ async function act(action, g, el) {
       await call('remove_game', { id: g.id });
       await refresh();
       break;
+    case 'versions':
+      versions[g.id] = 'loading';
+      render();
+      try {
+        versions[g.id] = await call('list_versions', { id: g.id });
+      } catch {
+        delete versions[g.id];
+      }
+      render();
+      break;
+    case 'versions-close':
+      delete versions[g.id];
+      render();
+      break;
+    case 'ignore-updates':
+      setGame(await call('set_ignore_updates', { id: g.id, ignore: !g.ignore_updates }));
+      break;
+    case 'reset-time':
+      if (!confirm(`Zerar o tempo de jogo de ${g.title}? Isso não pode ser desfeito.`)) break;
+      setGame(await call('reset_playtime', { id: g.id }));
+      toast('Tempo de jogo zerado.');
+      break;
+    case 'uninstall': {
+      if (!confirm(`Desinstalar ${g.title}? A pasta do port será apagada. Seus saves e configurações ficam guardados e voltam quando você instalar de novo.`)) break;
+      const kept = await call('uninstall_game', { id: g.id });
+      await refresh();
+      toast(kept.length ? `${g.title} desinstalado. Guardado para depois: ${kept.join(', ')}.` : `${g.title} desinstalado.`);
+      break;
+    }
+  }
+}
+
+async function backupSaves() {
+  const btn = $('#btn-backup');
+  btn.disabled = true;
+  btn.textContent = 'Fazendo backup…';
+  try {
+    const r = await call('backup_saves');
+    toast(`Backup feito: ${r.files} arquivo(s) de ${r.games} jogo(s) em ${r.path}`);
+    await call('open_backups');
+  } catch {
+    // the toast already shows why
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Backup dos saves';
   }
 }
 
@@ -551,6 +637,7 @@ async function addPcGame() {
 $('#btn-add').addEventListener('click', addExisting);
 $('#btn-add-pc').addEventListener('click', addPcGame);
 $('#btn-covers').addEventListener('click', openCovers);
+$('#btn-backup').addEventListener('click', backupSaves);
 document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => {
   tab = b.dataset.tab;
   tagFilter = null;

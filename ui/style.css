@@ -133,6 +133,14 @@ textarea {
 }
 code { font: 12px Consolas, "Cascadia Mono", monospace; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
 .covers-page { max-width: 820px; }
+.versions { list-style: none; padding: 0; margin: 8px 0; }
+.versions li {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--line);
+}
+.versions li:last-child { border-bottom: none; }
+.versions button { font-size: 12px; padding: 5px 10px; }
+.topbar .actions { flex-wrap: wrap; justify-content: flex-end; }
 
 /* Game page */
 .back { margin-bottom: 16px; }

@@ -6,6 +6,7 @@ mod github;
 mod install;
 mod library;
 mod play;
+mod saves;
 mod shortcut;
 
 use base64::Engine;
@@ -33,6 +34,12 @@ pub struct AppState {
     pub settings: Mutex<covers::Settings>,
     pub settings_path: PathBuf,
     pub covers: covers::Dirs,
+    /// Where RecompHUB installs ports; only folders under it are ever deleted.
+    pub games_root: PathBuf,
+    /// Saves moved out of uninstalled ports, one folder per port id.
+    pub pending_root: PathBuf,
+    /// Dated .zip files from "Backup dos saves".
+    pub backups_root: PathBuf,
 }
 
 /// Everything the interface shows about one game.
@@ -64,6 +71,12 @@ struct GameView {
     version: Option<String>,
     latest_version: Option<String>,
     update_available: bool,
+    /// The player turned off "versão nova" notices for this port.
+    ignore_updates: bool,
+    /// Installed by RecompHUB (it may uninstall it), not added from the player's folder.
+    installed_by_hub: bool,
+    /// Saves kept from an uninstall, waiting for the next install.
+    pending_saves: bool,
     files: Option<FilesStatus>,
     total_seconds: u64,
     last_played: Option<u64>,
@@ -118,7 +131,7 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
     let files = dir.as_deref().filter(|_| installed).map(|d| files::status(game, d));
 
     let update_available = match (&entry, &latest, installed) {
-        (Some(e), Some(l), true) => match &e.version {
+        (Some(e), Some(l), true) if !e.ignore_updates => match &e.version {
             Some(v) => v != &l.tag,
             // Added from a folder: newer if the release came out a day after the copy's program.
             None => modified(&dir.as_ref().unwrap().join(&game.exe))
@@ -173,6 +186,9 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         cover,
         cover_source,
         icon: None,
+        ignore_updates: entry.as_ref().map(|e| e.ignore_updates).unwrap_or(false),
+        installed_by_hub: entry.as_ref().map(|e| e.version.is_some() && Path::new(&e.install_dir).starts_with(&state.games_root)).unwrap_or(false),
+        pending_saves: state.pending_root.join(&game.id).is_dir(),
     }
 }
 
@@ -222,6 +238,9 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         cover,
         cover_source,
         icon: covers::find(&state.covers.icons, id).and_then(|p| data_url(&p)),
+        ignore_updates: false,
+        installed_by_hub: false,
+        pending_saves: false,
     }
 }
 
@@ -508,7 +527,7 @@ async fn add_existing(app: AppHandle) -> Result<Option<GameView>, String> {
 
 /// Installs or updates a port from its official release.
 #[tauri::command]
-async fn install_game(app: AppHandle, id: String) -> Result<GameView, String> {
+async fn install_game(app: AppHandle, id: String, tag: Option<String>) -> Result<GameView, String> {
     let game = game_or_err(&id)?;
     {
         let state = app.state::<AppState>();
@@ -519,27 +538,150 @@ async fn install_game(app: AppHandle, id: String) -> Result<GameView, String> {
             return Err("A instalação já está em andamento.".into());
         }
     }
-    let result = install_inner(&app, game).await;
+    let result = install_inner(&app, game, tag).await;
     let state = app.state::<AppState>();
     state.installing.lock().unwrap().remove(game.id.as_str());
     result?;
     Ok(view(&state, game))
 }
 
-async fn install_inner(app: &AppHandle, game: &'static GameDef) -> Result<(), String> {
-    let release = github::latest(game).await?;
-    app.state::<AppState>().latest.lock().unwrap().insert(game.id.to_string(), release.clone());
+/// Installs the newest release, or `tag` ("Escolher versão"). An older pick turns off the
+/// "versão nova" notice so the port is not swapped back behind the player's back.
+async fn install_inner(app: &AppHandle, game: &'static GameDef, tag: Option<String>) -> Result<(), String> {
+    let list = github::releases(game, 20).await?;
+    let newest = list.first().cloned().ok_or("Nenhuma versão para Windows encontrada na página do projeto.")?;
+    let release = match &tag {
+        Some(t) => list.iter().find(|r| &r.tag == t).cloned().ok_or(format!("A versão {t} não está mais disponível."))?,
+        None => newest.clone(),
+    };
+    let state = app.state::<AppState>();
+    state.latest.lock().unwrap().insert(game.id.to_string(), newest.clone());
 
-    let existing = app.state::<AppState>().library.lock().unwrap().install_dir(game.id.as_str());
+    let existing = state.library.lock().unwrap().install_dir(game.id.as_str());
     let target = match existing {
         Some(d) if game.matches(&d) => d,
-        _ => app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("games").join(game.id.as_str()),
+        _ => state.games_root.join(game.id.as_str()),
     };
     install::install(app, game, &release, &target).await?;
+    // Saves kept from an earlier uninstall go back in place.
+    saves::restore(&state.pending_root.join(&game.id), &target)?;
 
-    let state = app.state::<AppState>();
-    state.library.lock().unwrap().add(&game.id, &target, Some(release.tag));
+    {
+        let mut lib = state.library.lock().unwrap();
+        lib.add(&game.id, &target, Some(release.tag.clone()));
+        if let Some(e) = lib.games.get_mut(&game.id) {
+            e.ignore_updates = release.tag != newest.tag;
+        }
+    }
     save(&state)
+}
+
+#[derive(Serialize)]
+struct VersionInfo {
+    tag: String,
+    published: u64,
+    size: u64,
+}
+
+/// "Escolher versão": the last releases with a Windows build.
+#[tauri::command]
+async fn list_versions(id: String) -> Result<Vec<VersionInfo>, String> {
+    let game = game_or_err(&id)?;
+    Ok(github::releases(game, 8)
+        .await?
+        .into_iter()
+        .map(|r| VersionInfo { tag: r.tag, published: r.published, size: r.asset_size })
+        .collect())
+}
+
+#[tauri::command]
+fn set_ignore_updates(app: AppHandle, id: String, ignore: bool) -> Result<GameView, String> {
+    let state = app.state::<AppState>();
+    state.library.lock().unwrap().games.get_mut(&id).ok_or("Jogo fora da biblioteca.")?.ignore_updates = ignore;
+    save(&state)?;
+    view_any(&state, &id)
+}
+
+#[tauri::command]
+fn reset_playtime(app: AppHandle, id: String) -> Result<GameView, String> {
+    let state = app.state::<AppState>();
+    {
+        let mut lib = state.library.lock().unwrap();
+        let e = lib.games.get_mut(&id).ok_or("Jogo fora da biblioteca.")?;
+        e.total_seconds = 0;
+        e.last_played = None;
+    }
+    save(&state)?;
+    view_any(&state, &id)
+}
+
+/// Deletes a port RecompHUB installed, keeping the player's files for the next install.
+/// A port added from the player's own folder is never deleted.
+#[tauri::command]
+fn uninstall_game(app: AppHandle, id: String) -> Result<Vec<String>, String> {
+    let game = game_or_err(&id)?;
+    let state = app.state::<AppState>();
+    let entry = state.library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
+    let dir = PathBuf::from(&entry.install_dir);
+    if entry.version.is_none() || !dir.starts_with(&state.games_root) || dir == state.games_root {
+        return Err("Este port foi adicionado de uma pasta sua: o RecompHUB não apaga arquivos que não instalou. Use \"Remover da biblioteca\".".into());
+    }
+    {
+        let s = state.sessions.lock().unwrap();
+        if s.is_running(&id) || s.is_launching(&id) {
+            return Err("Feche o jogo antes de desinstalar.".into());
+        }
+    }
+    if state.installing.lock().unwrap().contains(&id) {
+        return Err("Espere a instalação terminar.".into());
+    }
+    let owned = saves::owned_paths(&dir, &game.keep_on_update, files::save_dir(game, &dir).as_deref());
+    let kept = saves::preserve(&dir, &owned, &state.pending_root.join(&id))?;
+    std::fs::remove_dir_all(&dir).map_err(|e| format!("Não consegui apagar {}: {e}", dir.display()))?;
+    state.library.lock().unwrap().remove(&id);
+    save(&state)?;
+    Ok(kept)
+}
+
+#[derive(Serialize)]
+struct BackupResult {
+    path: String,
+    games: usize,
+    files: usize,
+}
+
+/// "Backup dos saves": every port's saves in one dated .zip.
+#[tauri::command]
+async fn backup_saves(app: AppHandle) -> Result<BackupResult, String> {
+    let (items, folder) = {
+        let state = app.state::<AppState>();
+        let lib = state.library.lock().unwrap();
+        let items: Vec<(String, PathBuf)> = lib
+            .games
+            .iter()
+            .filter_map(|(id, e)| {
+                let game = catalog::get(id)?;
+                Some((id.clone(), files::save_dir(game, Path::new(&e.install_dir))?))
+            })
+            .collect();
+        (items, state.backups_root.clone())
+    };
+    if items.is_empty() {
+        return Err("Nenhum port da biblioteca tem saves ainda.".into());
+    }
+    let games = items.len();
+    let date = library::date(library::now());
+    let (path, files) = tauri::async_runtime::spawn_blocking(move || saves::backup(&items, &folder, &date))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(BackupResult { path: path.display().to_string(), games, files })
+}
+
+#[tauri::command]
+fn open_backups(app: AppHandle) -> Result<(), String> {
+    let folder = app.state::<AppState>().backups_root.clone();
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    app.opener().open_path(folder.display().to_string(), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// The player picks their game files; they are checked and handed to the port.
@@ -687,12 +829,16 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             catalog_sync::load_startup(&dir);
+            let local = app.path().app_local_data_dir()?;
             let library_path = dir.join("library.json");
             let settings_path = dir.join("settings.json");
             app.manage(AppState {
                 settings: Mutex::new(covers::Settings::load(&settings_path)),
                 settings_path,
                 covers: covers::Dirs::new(&dir),
+                games_root: local.join("games"),
+                pending_root: local.join("saves-pendentes"),
+                backups_root: dir.join("Backups de saves"),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
@@ -720,6 +866,12 @@ pub fn run() {
             rename_game,
             set_tags,
             open_link,
+            list_versions,
+            set_ignore_updates,
+            reset_playtime,
+            uninstall_game,
+            backup_saves,
+            open_backups,
             choose_cover,
             clear_cover,
             download_covers,

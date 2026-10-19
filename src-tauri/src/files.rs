@@ -62,7 +62,8 @@ pub fn serial(game: &GameDef) -> Option<String> {
 pub fn save_dir(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     match &game.files {
-        Verifier::Ps4Dump { .. } => candidates.extend(ps4::user_dir(&game.files)),
+        // A custom "Saves folder" holds savedata\ (and the shader cache, left out).
+        Verifier::Ps4Dump { .. } => candidates.extend(ps4::user_dir(&game.files).map(|d| d.join("savedata"))),
         Verifier::N64Rom { .. } => {
             if let Some(data) = n64::data_dir(&game.files, install_dir) {
                 candidates.push(data.join("saves"));

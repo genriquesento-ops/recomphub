@@ -44,7 +44,16 @@ pub fn client() -> reqwest::Client {
 
 /// The newest stable release that has a Windows build.
 pub async fn latest(game: &GameDef) -> Result<Release, String> {
-    let url = format!("https://api.github.com/repos/{}/releases?per_page=10", game.repo);
+    releases(game, 1)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Nenhuma versão para Windows encontrada na página do projeto".into())
+}
+
+/// Up to `max` stable releases with a Windows build, newest first ("Escolher versão").
+pub async fn releases(game: &GameDef, max: usize) -> Result<Vec<Release>, String> {
+    let url = format!("https://api.github.com/repos/{}/releases?per_page=20", game.repo);
     let resp = client()
         .get(&url)
         .header("Accept", "application/vnd.github+json")
@@ -54,8 +63,12 @@ pub async fn latest(game: &GameDef) -> Result<Release, String> {
     if !resp.status().is_success() {
         return Err(format!("O GitHub respondeu {}", resp.status()));
     }
-    let releases: Vec<ApiRelease> = resp.json().await.map_err(|e| e.to_string())?;
-    for r in releases.into_iter().filter(|r| !r.draft && !r.prerelease) {
+    let api: Vec<ApiRelease> = resp.json().await.map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in api.into_iter().filter(|r| !r.draft && !r.prerelease) {
+        if out.len() >= max {
+            break;
+        }
         let Some(asset) = r
             .assets
             .iter()
@@ -65,7 +78,7 @@ pub async fn latest(game: &GameDef) -> Result<Release, String> {
         };
         let sha_name = format!("{}.sha256", asset.name);
         let sha256_url = r.assets.iter().find(|a| a.name == sha_name).map(|a| a.browser_download_url.clone());
-        return Ok(Release {
+        out.push(Release {
             tag: r.tag_name.clone(),
             published: r.published_at.as_deref().and_then(parse_time).unwrap_or(0),
             asset_url: asset.browser_download_url.clone(),
@@ -73,7 +86,7 @@ pub async fn latest(game: &GameDef) -> Result<Release, String> {
             sha256_url,
         });
     }
-    Err("Nenhuma versão para Windows encontrada na página do projeto".into())
+    Ok(out)
 }
 
 /// "2026-10-18T06:10:15Z" to Unix time.
