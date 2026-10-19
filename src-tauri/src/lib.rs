@@ -1,4 +1,5 @@
 mod catalog;
+mod covers;
 mod files;
 mod github;
 mod install;
@@ -28,6 +29,9 @@ pub struct AppState {
     pub installing: Mutex<HashSet<String>>,
     /// Game page to show, asked for by a shortcut before the page loaded.
     pub pending_open: Mutex<Option<String>>,
+    pub settings: Mutex<covers::Settings>,
+    pub settings_path: PathBuf,
+    pub covers: covers::Dirs,
 }
 
 /// Everything the interface shows about one game.
@@ -61,6 +65,22 @@ struct GameView {
     total_seconds: u64,
     last_played: Option<u64>,
     cover: Option<String>,
+    /// Where the cover came from: "custom", "own_files", "downloaded" or none.
+    cover_source: Option<&'static str>,
+    /// A PC game's program icon, shown when there is no cover.
+    icon: Option<String>,
+}
+
+/// The cover shown for a game, in order: the player's choice, their own files, a download.
+fn pick_cover(state: &AppState, id: &str, own: Option<PathBuf>) -> (Option<String>, Option<&'static str>) {
+    let found = covers::find(&state.covers.custom, id)
+        .map(|p| (p, "custom"))
+        .or_else(|| own.map(|p| (p, "own_files")))
+        .or_else(|| covers::find(&state.covers.downloaded, id).map(|p| (p, "downloaded")));
+    match found {
+        Some((p, source)) => (data_url(&p), Some(source)),
+        None => (None, None),
+    }
 }
 
 fn data_url(path: &Path) -> Option<String> {
@@ -68,6 +88,7 @@ fn data_url(path: &Path) -> Option<String> {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "svg" => "image/svg+xml",
+        "webp" => "image/webp",
         _ => return None,
     };
     let bytes = std::fs::read(path).ok()?;
@@ -103,6 +124,8 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         },
         _ => false,
     };
+
+    let (cover, cover_source) = pick_cover(state, game.id, files::cover(game, dir.as_deref().filter(|_| installed)));
 
     let status = if installing {
         "installing"
@@ -143,7 +166,9 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         files,
         total_seconds: entry.as_ref().map(|e| e.total_seconds).unwrap_or(0),
         last_played: entry.as_ref().and_then(|e| e.last_played),
-        cover: files::cover(game, dir.as_deref().filter(|_| installed)).and_then(|p| data_url(&p)),
+        cover,
+        cover_source,
+        icon: None,
     }
 }
 
@@ -154,6 +179,7 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         (s.is_running(id), s.is_launching(id), s.started(id))
     };
     let exe = pc_exe(entry);
+    let (cover, cover_source) = pick_cover(state, id, None);
     let status = if running {
         "running"
     } else if launching {
@@ -188,7 +214,9 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         files: None,
         total_seconds: entry.total_seconds,
         last_played: entry.last_played,
-        cover: None,
+        cover,
+        cover_source,
+        icon: covers::find(&state.covers.icons, id).and_then(|p| data_url(&p)),
     }
 }
 
@@ -292,6 +320,8 @@ async fn add_pc_game(app: AppHandle) -> Result<Option<GameView>, String> {
     let title = exe.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Jogo".into());
     state.library.lock().unwrap().add_pc_game(&id, &exe, &title);
     save(&state)?;
+    // Without a cover the card shows the program's own icon; failing to read it is harmless.
+    let _ = covers::extract_icon(&state.covers, &id, &exe);
     view_any(&state, &id).map(Some)
 }
 
@@ -329,6 +359,86 @@ fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<GameView, S
     }
     save(&state)?;
     view_any(&state, &id)
+}
+
+/// "Escolher capa": any game in the library can use a picture from the player's PC.
+#[tauri::command]
+async fn choose_cover(app: AppHandle, id: String) -> Result<Option<GameView>, String> {
+    let state = app.state::<AppState>();
+    if !state.library.lock().unwrap().games.contains_key(&id) {
+        return Err("Adicione o jogo à biblioteca primeiro.".into());
+    }
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Escolha a imagem da capa")
+        .add_filter("Imagem", covers::IMAGE_EXTS)
+        .blocking_pick_file()
+        .and_then(|p| p.into_path().ok());
+    let Some(picture) = picked else { return Ok(None) };
+    covers::set_custom(&state.covers, &id, &picture)?;
+    view_any(&state, &id).map(Some)
+}
+
+#[tauri::command]
+fn clear_cover(app: AppHandle, id: String) -> Result<GameView, String> {
+    let state = app.state::<AppState>();
+    covers::clear(&state.covers, &id);
+    view_any(&state, &id)
+}
+
+#[derive(Serialize)]
+struct CoverDownload {
+    downloaded: usize,
+    missing: Vec<String>,
+    library: Vec<GameView>,
+}
+
+/// "Baixar capas que faltam", as PCSX2's cover downloader: for each game in the library
+/// without a cover, the catalog's curated addresses first, then the player's templates.
+#[tauri::command]
+async fn download_covers(app: AppHandle) -> Result<CoverDownload, String> {
+    let todo: Vec<(String, String, Vec<String>)> = {
+        let state = app.state::<AppState>();
+        let templates = state.settings.lock().unwrap().cover_templates.clone();
+        get_library(app.clone())
+            .into_iter()
+            .filter(|g| g.in_library && g.cover.is_none())
+            .map(|g| {
+                let game = catalog::get(&g.id);
+                let serial = game.and_then(files::serial);
+                let mut urls: Vec<String> = game.map(|d| d.cover_urls.iter().map(|u| u.to_string()).collect()).unwrap_or_default();
+                urls.extend(templates.iter().filter_map(|t| covers::fill(t, serial.as_deref(), &g.title)));
+                (g.id, g.title, urls)
+            })
+            .collect()
+    };
+    let mut downloaded = 0;
+    let mut missing = Vec::new();
+    let state = app.state::<AppState>();
+    for (id, title, urls) in todo {
+        if !urls.is_empty() && covers::download(&state.covers, &id, &urls).await {
+            downloaded += 1;
+        } else {
+            missing.push(title);
+        }
+    }
+    Ok(CoverDownload { downloaded, missing, library: get_library(app.clone()) })
+}
+
+#[tauri::command]
+fn get_cover_templates(app: AppHandle) -> Vec<String> {
+    app.state::<AppState>().settings.lock().unwrap().cover_templates.clone()
+}
+
+#[tauri::command]
+fn set_cover_templates(app: AppHandle, lines: Vec<String>) -> Result<Vec<String>, String> {
+    let clean = covers::clean_templates(&lines)?;
+    let state = app.state::<AppState>();
+    let mut settings = state.settings.lock().unwrap();
+    settings.cover_templates = clean.clone();
+    settings.save(&state.settings_path)?;
+    Ok(clean)
 }
 
 #[tauri::command]
@@ -571,7 +681,11 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let library_path = dir.join("library.json");
+            let settings_path = dir.join("settings.json");
             app.manage(AppState {
+                settings: Mutex::new(covers::Settings::load(&settings_path)),
+                settings_path,
+                covers: covers::Dirs::new(&dir),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
@@ -599,6 +713,11 @@ pub fn run() {
             rename_game,
             set_tags,
             open_link,
+            choose_cover,
+            clear_cover,
+            download_covers,
+            get_cover_templates,
+            set_cover_templates,
             take_pending_open,
             remove_game,
             open_project,

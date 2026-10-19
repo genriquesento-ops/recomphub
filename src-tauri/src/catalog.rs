@@ -47,6 +47,8 @@ pub struct GameDef {
     /// "Como obter seus arquivos": steps to copy the game from the player's own copy.
     pub guide: &'static [&'static str],
     pub guide_links: &'static [GuideLink],
+    /// Curated cover addresses, tried before the player's own templates.
+    pub cover_urls: &'static [&'static str],
 }
 
 pub const GAMES: &[GameDef] = &[
@@ -79,6 +81,8 @@ pub const GAMES: &[GameDef] = &[
             label: "Instruções do gow3_pc",
             url: "https://github.com/FelipePrado0/gow3_pc#download-and-play",
         }],
+        // The cover comes from the player's own dump (sce_sys/icon0.png).
+        cover_urls: &[],
     },
     GameDef {
         id: "banjo",
@@ -108,6 +112,8 @@ pub const GAMES: &[GameDef] = &[
             GuideLink { label: "Sanni Cart Reader (leitor de cartuchos aberto)", url: "https://github.com/sanni/cartreader" },
             GuideLink { label: "Instruções do Banjo: Recompiled", url: "https://github.com/BanjoRecomp/BanjoRecomp#readme" },
         ],
+        // libretro-thumbnails, the box art set RetroArch downloads.
+        cover_urls: &["https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%2064/Named_Boxarts/Banjo-Kazooie%20(USA).png"],
     },
 ];
 

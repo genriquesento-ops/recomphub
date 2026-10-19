@@ -25,6 +25,10 @@ oficiais de cada projeto, e cada jogo mostra o crédito de quem fez o port.
   própria cópia.
 - "Outros jogos de PC": adicione qualquer jogo instalado pelo .exe para ter tempo de jogo e
   atalhos no mesmo lugar. Abas e etiquetas para organizar a biblioteca.
+- Capas no estilo do baixador de capas do PCSX2 (e da coleção
+  [xlenore/ps2-covers](https://github.com/xlenore/ps2-covers)): imagem escolhida por você,
+  imagem dos seus próprios arquivos, capa baixada de fontes do catálogo ou de endereços seus com
+  `${serial}` e `${title}`, e o ícone do programa para jogos de PC.
 - Botão para fechar o jogo, atalhos na área de trabalho e no menu Iniciar (que abrem o jogo pelo
   RecompHUB) e acesso à pasta de saves.
 

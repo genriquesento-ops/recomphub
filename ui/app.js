@@ -68,6 +68,9 @@ async function call(cmd, args) {
 }
 
 function coverHtml(g) {
+  if (!g.cover && g.icon) {
+    return `<div class="cover"><div class="iconcover"><img src="${g.icon}" alt=""><span>${esc(g.title)}</span></div></div>`;
+  }
   if (!g.cover) return `<div class="cover"><div class="placeholder">${esc(g.title)}</div></div>`;
   const contain = g.cover.startsWith('data:image/svg') ? ' contain' : '';
   return `<div class="cover${contain}"><img src="${g.cover}" alt=""></div>`;
@@ -203,7 +206,7 @@ function renderPcDetail(g) {
   $('#detail').innerHTML = `
     <button class="ghost back" data-act="back">← Biblioteca</button>
     <div class="detail">
-      <div>${coverHtml(g)}</div>
+      <div>${coverColumn(g)}</div>
       <div>
         <h2>${esc(g.title)}</h2>
         <div class="credit">Jogo de PC adicionado por você.</div>
@@ -245,7 +248,72 @@ function progressBox(g) {
     </div>`;
 }
 
+const COVER_SOURCE = {
+  custom: 'Capa escolhida por você',
+  own_files: 'Capa dos seus arquivos do jogo',
+  downloaded: 'Capa baixada',
+};
+
+function coverColumn(g) {
+  if (!g.in_library) return coverHtml(g);
+  return `
+    ${coverHtml(g)}
+    ${g.cover_source ? `<p class="muted">${COVER_SOURCE[g.cover_source]}</p>` : ''}
+    <div class="cover-actions">
+      <button data-act="cover-choose">Escolher capa</button>
+      ${['custom', 'downloaded'].includes(g.cover_source) ? '<button class="ghost" data-act="cover-clear">Restaurar</button>' : ''}
+    </div>`;
+}
+
+let coverTemplates = null;   // loaded when the covers page opens
+let coverReport = null;      // last "Baixar capas" result
+
+function renderCovers() {
+  const report = coverReport ? `
+    <div class="box ${coverReport.missing.length ? 'warn' : 'ok'}">
+      <h3>${coverReport.downloaded} capa(s) baixada(s)</h3>
+      ${coverReport.missing.length ? `<p>Sem capa encontrada: ${coverReport.missing.map(esc).join(', ')}.</p>
+        <p class="muted">Para esses, use "Escolher capa" na página do jogo ou adicione um endereço abaixo.</p>` : ''}
+    </div>` : '';
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="back">← Biblioteca</button>
+    <div class="covers-page">
+      <h2>Capas</h2>
+      <p>Funciona como o baixador de capas do PCSX2: para cada jogo da biblioteca sem capa, o RecompHUB
+        tenta os endereços abaixo e guarda a primeira imagem que encontrar. Cada capa é baixada uma vez só.</p>
+      <div class="box">
+        <h3>Ordem das capas</h3>
+        <ol>
+          <li>A imagem que você escolheu na página do jogo.</li>
+          <li>A imagem dos seus próprios arquivos do jogo (por exemplo, o ícone do dump de PS4).</li>
+          <li>Uma capa baixada: primeiro das fontes do catálogo do RecompHUB, depois dos seus endereços.</li>
+          <li>Para jogos de PC sem capa, o ícone do programa.</li>
+        </ol>
+      </div>
+      <div class="row"><button class="primary" data-act="covers-download">Baixar capas que faltam</button></div>
+      ${report}
+      <div class="box">
+        <h3>Seus endereços de capas (opcional)</h3>
+        <p>Um endereço por linha, começando com <code>https://</code>. Use <code>\${serial}</code> para o código do jogo
+          (como <code>CUSA01715</code>) e <code>\${title}</code> para o nome do jogo.</p>
+        <textarea id="templates" spellcheck="false" placeholder="https://exemplo.com/capas/\${serial}.jpg">${esc((coverTemplates || []).join('\n'))}</textarea>
+        <div class="row"><button data-act="covers-save">Salvar endereços</button></div>
+        <p class="muted">As capas ficam só no seu PC. Os endereços são escolhidos por você; o RecompHUB só aceita imagens (PNG, JPG ou WEBP) de até 10 MB.</p>
+      </div>
+    </div>`;
+  document.querySelectorAll('#detail [data-act]').forEach((el) =>
+    el.addEventListener('click', () => act(el.dataset.act, null, el)));
+}
+
+async function openCovers() {
+  openId = '__covers';
+  coverReport = null;
+  coverTemplates = await call('get_cover_templates');
+  render();
+}
+
 function renderDetail() {
+  if (openId === '__covers') return renderCovers();
   const g = games.find((x) => x.id === openId);
   if (!g) {
     openId = null;
@@ -295,7 +363,7 @@ function renderPortDetail(g) {
   $('#detail').innerHTML = `
     <button class="ghost back" data-act="back">← Biblioteca</button>
     <div class="detail">
-      <div>${coverHtml(g)}</div>
+      <div>${coverColumn(g)}</div>
       <div>
         <h2>${esc(g.title)}</h2>
         <div class="credit">Port <b>${esc(g.port_name)}</b>, feito por ${esc(g.port_authors)} ·
@@ -347,6 +415,32 @@ async function act(action, g, el) {
     case 'link':
       await call('open_link', { url: el.dataset.url });
       break;
+    case 'cover-choose': {
+      const updated = await call('choose_cover', { id: g.id });
+      if (updated) setGame(updated);
+      break;
+    }
+    case 'cover-clear':
+      setGame(await call('clear_cover', { id: g.id }));
+      break;
+    case 'covers-save': {
+      const lines = $('#templates').value.split('\n');
+      coverTemplates = await call('set_cover_templates', { lines });
+      toast(coverTemplates.length ? 'Endereços salvos.' : 'Nenhum endereço salvo.');
+      render();
+      break;
+    }
+    case 'covers-download': {
+      el.disabled = true;
+      el.textContent = 'Baixando capas…';
+      try {
+        coverReport = await call('download_covers');
+        games = coverReport.library;
+      } finally {
+        render();
+      }
+      break;
+    }
     case 'tags': {
       const tags = $('#tags-input').value.split(',');
       setGame(await call('set_tags', { id: g.id, tags }));
@@ -439,6 +533,7 @@ async function addPcGame() {
 
 $('#btn-add').addEventListener('click', addExisting);
 $('#btn-add-pc').addEventListener('click', addPcGame);
+$('#btn-covers').addEventListener('click', openCovers);
 document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => {
   tab = b.dataset.tab;
   render();
@@ -474,7 +569,8 @@ listen('open-game', (e) => openGame(e.payload));
 
 // Keeps "Jogando há …" current.
 setInterval(() => {
-  if (games.some((g) => g.status === 'running')) render();
+  // Not on the covers page: it would erase addresses being typed.
+  if (openId !== '__covers' && games.some((g) => g.status === 'running')) render();
 }, 20000);
 
 // Show the library at once, then ask GitHub for new versions in the background.

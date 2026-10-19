@@ -41,6 +41,16 @@ pub fn provide(game: &GameDef, install_dir: &Path, path: &Path) -> FilesStatus {
     }
 }
 
+/// The game's serial, for cover addresses with ${serial}.
+pub fn serial(game: &GameDef) -> Option<String> {
+    match game.kind {
+        // The player's own dump says which edition it is (CUSA01623 or CUSA01715).
+        Kind::Gow3 => gow3::title_id(),
+        // Only the North American 1.0 cartridge works with the port.
+        Kind::Banjo => Some("NUS-NBKE-USA".to_string()),
+    }
+}
+
 /// The folder where the port keeps the player's saves, when it exists.
 pub fn save_dir(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     let dir = match game.kind {
@@ -136,6 +146,11 @@ mod gow3 {
 
     pub fn game_dir() -> Option<PathBuf> {
         setting_dir("game_dir")
+    }
+
+    pub fn title_id() -> Option<String> {
+        let sfo = std::fs::read(game_dir()?.join("sce_sys").join("param.sfo")).ok()?;
+        sfo::read_string(&sfo, "TITLE_ID").filter(|t| !t.is_empty())
     }
 
     /// A custom "Saves folder" chosen in the port's launcher.
