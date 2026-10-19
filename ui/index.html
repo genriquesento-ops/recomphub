@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RecompHUB</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Recomp<span>HUB</span></div>
+    <div class="actions">
+      <button id="btn-updates" class="ghost">Verificar atualizações</button>
+      <button id="btn-add" class="primary">Adicionar jogo</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="library">
+      <h1>Biblioteca</h1>
+      <div id="grid" class="grid"></div>
+    </section>
+
+    <section id="detail" hidden></section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

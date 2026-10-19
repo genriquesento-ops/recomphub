@@ -1,0 +1,32 @@
+[package]
+name = "recomphub"
+version = "0.1.0"
+description = "Launcher for native ports of console games"
+edition = "2021"
+
+[lib]
+name = "recomphub_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+futures-util = "0.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+sha2 = "0.10"
+sysinfo = "0.32"
+base64 = "0.22"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
