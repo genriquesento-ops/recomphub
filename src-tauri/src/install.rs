@@ -59,7 +59,7 @@ async fn download_and_extract(
         hasher.update(&chunk);
         done += chunk.len() as u64;
         if done - last_emit > 512 * 1024 || done == total {
-            emit(app, game.id, "download", done, total);
+            emit(app, &game.id, "download", done, total);
             last_emit = done;
         }
     }
@@ -67,7 +67,7 @@ async fn download_and_extract(
     drop(file);
 
     if let Some(url) = &release.sha256_url {
-        emit(app, game.id, "verify", 0, 0);
+        emit(app, &game.id, "verify", 0, 0);
         let expected = client
             .get(url)
             .send()
@@ -85,14 +85,14 @@ async fn download_and_extract(
     }
 
     let (app2, zip_path, target) = (app.clone(), zip_path.to_path_buf(), target.to_path_buf());
-    let keep = game.keep_on_update;
-    let id = game.id;
-    tauri::async_runtime::spawn_blocking(move || extract(&app2, id, &zip_path, &target, keep))
+    let keep = game.keep_on_update.clone();
+    let id = game.id.clone();
+    tauri::async_runtime::spawn_blocking(move || extract(&app2, &id, &zip_path, &target, &keep))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn extract(app: &AppHandle, id: &str, zip_path: &Path, target: &Path, keep: &[&str]) -> Result<(), String> {
+fn extract(app: &AppHandle, id: &str, zip_path: &Path, target: &Path, keep: &[String]) -> Result<(), String> {
     let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("O arquivo baixado não é um zip válido: {e}"))?;
 
@@ -119,7 +119,7 @@ fn extract(app: &AppHandle, id: &str, zip_path: &Path, target: &Path, keep: &[&s
             continue;
         }
         let rel_text = rel.to_string_lossy().replace('\\', "/");
-        let kept = keep.iter().any(|k| if k.ends_with('/') { rel_text.starts_with(k) } else { rel_text == *k });
+        let kept = keep.iter().any(|k| if k.ends_with('/') { rel_text.starts_with(k.as_str()) } else { rel_text == *k });
         if kept && out.exists() {
             continue;
         }

@@ -3,8 +3,9 @@ const { listen } = window.__TAURI__.event;
 
 let games = [];
 let openId = null;
-let tab = 'all';          // 'all', 'port' or 'pc_game'
-let tagFilter = null;     // one of the player's tags, or null
+let tab = 'all';          // 'all', 'port', 'pc_game' or 'discover'
+let tagFilter = null;     // a tag (the player's, or the catalog's in Descobrir), or null
+let search = '';
 const progress = {};      // id -> { stage, done, total }
 const filesResult = {};   // id -> last check after the player picked files
 
@@ -83,14 +84,28 @@ function chips(g) {
   return html;
 }
 
+// Library tabs show what the player has; Descobrir shows the catalog's other ports.
+function inTab(g) {
+  if (tab === 'discover') return g.kind === 'port' && !g.in_library;
+  if (!g.in_library) return false;
+  return tab === 'all' || g.kind === tab;
+}
+
+const tagsOf = (g) => (tab === 'discover' ? g.catalog_tags : g.tags);
+
+function matchesSearch(g) {
+  if (!search) return true;
+  const hay = [g.title, g.port_name, g.family, ...g.tags, ...g.catalog_tags].join(' ').toLowerCase();
+  return search.toLowerCase().split(/\s+/).every((w) => hay.includes(w));
+}
+
 function visibleGames() {
-  return games.filter((g) =>
-    (tab === 'all' || g.kind === tab) && (!tagFilter || g.tags.includes(tagFilter)));
+  return games.filter((g) => inTab(g) && matchesSearch(g) && (!tagFilter || tagsOf(g).includes(tagFilter)));
 }
 
 function renderTabs() {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  const tags = [...new Set(games.flatMap((g) => g.tags))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const tags = [...new Set(games.filter(inTab).flatMap(tagsOf))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   if (tagFilter && !tags.includes(tagFilter)) tagFilter = null;
   $('#tagbar').innerHTML = tags.map((t) =>
     `<button class="tag${t === tagFilter ? ' on' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
@@ -106,9 +121,11 @@ function renderGrid() {
   const empty = $('#empty');
   empty.hidden = list.length > 0;
   if (!list.length) {
-    empty.textContent = tab === 'pc_game' && !tagFilter
-      ? 'Nenhum jogo de PC ainda. Use "Adicionar jogo de PC" e escolha o programa (.exe) de um jogo que você já tem instalado.'
-      : 'Nenhum jogo com esse filtro.';
+    const filtered = tagFilter || search;
+    empty.textContent = filtered ? 'Nenhum jogo com esse filtro.'
+      : tab === 'pc_game' ? 'Nenhum jogo de PC ainda. Use "Adicionar jogo de PC" e escolha o programa (.exe) de um jogo que você já tem instalado.'
+      : tab === 'discover' ? 'Você já tem todos os ports do catálogo na biblioteca.'
+      : 'Sua biblioteca está vazia. Veja os ports disponíveis na aba "Descobrir", ou use "Adicionar port" se já tiver um instalado.';
   }
   $('#grid').innerHTML = list.map((g) => `
     <div class="card" data-id="${g.id}">
@@ -117,7 +134,7 @@ function renderGrid() {
         <div class="title">${esc(g.title)}</div>
         <div>${chips(g)}</div>
         <div class="meta">${g.status === 'running' ? `Jogando há ${sessionLength(g)}`
-          : g.in_library ? `${playTime(g.total_seconds)} · última vez ${lastPlayed(g.last_played)}` : 'Fora da biblioteca'}</div>
+          : g.in_library ? `${playTime(g.total_seconds)} · última vez ${lastPlayed(g.last_played)}` : `Port ${esc(g.port_name)}`}</div>
       </div>
     </div>`).join('');
   document.querySelectorAll('.card').forEach((el) => el.addEventListener('click', () => openGame(el.dataset.id)));
@@ -536,8 +553,13 @@ $('#btn-add-pc').addEventListener('click', addPcGame);
 $('#btn-covers').addEventListener('click', openCovers);
 document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => {
   tab = b.dataset.tab;
+  tagFilter = null;
   render();
 }));
+$('#search').addEventListener('input', (e) => {
+  search = e.target.value.trim();
+  renderGrid();
+});
 $('#btn-updates').addEventListener('click', async () => {
   games = await call('check_updates');
   render();

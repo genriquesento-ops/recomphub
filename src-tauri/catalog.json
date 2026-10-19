@@ -1,0 +1,214 @@
+{
+  "format": 1,
+  "revision": 1,
+  "ports": [
+    {
+      "id": "gow3",
+      "title": "God of War III Remastered",
+      "family": "PS4",
+      "tags": ["ps4", "ação"],
+      "port_name": "gow3_pc",
+      "port_authors": "FelipePrado0 e colaboradores",
+      "project_url": "https://github.com/FelipePrado0/gow3_pc",
+      "repo": "FelipePrado0/gow3_pc",
+      "asset_prefix": "gow3-windows",
+      "asset_suffix": ".zip",
+      "exe": "Play God of War III.exe",
+      "icon": "launcher/gow3.ico",
+      "markers": ["Play God of War III.exe", "bin/gow3-probe.exe"],
+      "keep_on_update": ["gow3.ini", "user/"],
+      "requirements": "Windows 10/11 64-bit, processador com AVX e placa de vídeo com Vulkan 1.3.",
+      "needs": "A pasta com o dump da sua própria cópia de PS4 (a que tem eboot.bin, sce_module e sce_sys).",
+      "files_help": "O dump é feito no seu PS4 com o jogo instalado. Versões testadas pelo port: CUSA01623 e CUSA01715, versões 01.00 e 01.02.",
+      "files": {
+        "kind": "ps4_dump",
+        "title_ids": ["CUSA01623", "CUSA01715"],
+        "tested_versions": ["01.00", "01.02"],
+        "settings_file": "%APPDATA%\\gow3-launcher\\settings.json",
+        "game_dir_key": "game_dir",
+        "update_dir_key": "update_dir",
+        "user_dir_key": "user_dir"
+      },
+      "saves": ["{install}\\user"],
+      "cover_files": ["launcher/gow3.png"],
+      "cover_urls": [],
+      "guide": [
+        "Você precisa de um PS4 com o God of War III Remastered instalado: do disco ou comprado na sua conta.",
+        "Com uma ferramenta de dump para PS4, copie o jogo instalado para um HD externo. O resultado é uma pasta com eboot.bin, sce_module e sce_sys.",
+        "Se o seu PS4 tiver a atualização 01.02, copie também a pasta da atualização: o port aceita as duas versões.",
+        "Passe a pasta para o PC e escolha-a aqui no RecompHUB. Ele confere o código do jogo e a versão."
+      ],
+      "guide_links": [
+        { "label": "Instruções do gow3_pc", "url": "https://github.com/FelipePrado0/gow3_pc#download-and-play" }
+      ]
+    },
+    {
+      "id": "banjo",
+      "title": "Banjo-Kazooie",
+      "family": "N64",
+      "tags": ["n64", "plataforma"],
+      "port_name": "Banjo: Recompiled",
+      "port_authors": "equipe Banjo: Recompiled (N64: Recompiled)",
+      "project_url": "https://github.com/BanjoRecomp/BanjoRecomp",
+      "repo": "BanjoRecomp/BanjoRecomp",
+      "asset_prefix": "BanjoRecompiled-",
+      "asset_suffix": "-Windows.zip",
+      "exe": "BanjoRecompiled.exe",
+      "icon": "BanjoRecompiled.exe",
+      "markers": ["BanjoRecompiled.exe"],
+      "keep_on_update": ["portable.txt"],
+      "requirements": "Windows 10/11 64-bit e placa de vídeo com Direct3D 12 ou Vulkan 1.2.",
+      "needs": "O arquivo da ROM da sua própria cópia: Banjo-Kazooie norte-americano (USA), versão 1.0.",
+      "files_help": "A ROM é a cópia do cartucho de N64, feita com um leitor de cartuchos. Formatos aceitos: .z64, .n64 e .v64 (não compactado).",
+      "files": {
+        "kind": "n64_rom",
+        "xxh3": "0x1B67585D56E07F8C",
+        "program_id": "BanjoRecompiled",
+        "game_id": "bk.n64.us.1.0",
+        "edition": "norte-americana (USA) 1.0",
+        "region": "E",
+        "revision": 0,
+        "name_hint": "banjo"
+      },
+      "saves": [],
+      "cover_files": ["assets/Banjo.svg"],
+      "cover_urls": ["https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%2064/Named_Boxarts/Banjo-Kazooie%20(USA).png"],
+      "serial": "NUS-NBKE-USA",
+      "guide": [
+        "Você precisa do cartucho original do Banjo-Kazooie norte-americano (NTSC-U).",
+        "Ligue um leitor de cartuchos de N64 ao PC e copie o cartucho para um arquivo .z64.",
+        "Escolha o arquivo aqui no RecompHUB. Ele confere se é exatamente a versão USA 1.0 e explica o que estiver diferente."
+      ],
+      "guide_links": [
+        { "label": "Sanni Cart Reader (leitor de cartuchos aberto)", "url": "https://github.com/sanni/cartreader" },
+        { "label": "Instruções do Banjo: Recompiled", "url": "https://github.com/BanjoRecomp/BanjoRecomp#readme" }
+      ]
+    },
+    {
+      "id": "mm",
+      "title": "The Legend of Zelda: Majora's Mask",
+      "family": "N64",
+      "tags": ["n64", "aventura"],
+      "port_name": "Zelda 64: Recompiled",
+      "port_authors": "equipe Zelda64Recomp (N64: Recompiled)",
+      "project_url": "https://github.com/Zelda64Recomp/Zelda64Recomp",
+      "repo": "Zelda64Recomp/Zelda64Recomp",
+      "asset_prefix": "Zelda64Recompiled-",
+      "asset_suffix": "-Windows.zip",
+      "exe": "Zelda64Recompiled.exe",
+      "icon": "Zelda64Recompiled.exe",
+      "markers": ["Zelda64Recompiled.exe"],
+      "keep_on_update": ["portable.txt"],
+      "requirements": "Windows 10/11 64-bit e placa de vídeo com Direct3D 12 ou Vulkan 1.2.",
+      "needs": "O arquivo da ROM da sua própria cópia: Majora's Mask norte-americano (USA), versão 1.0.",
+      "files_help": "A ROM é a cópia do cartucho de N64, feita com um leitor de cartuchos. Formatos aceitos: .z64, .n64 e .v64 (não compactado).",
+      "files": {
+        "kind": "n64_rom",
+        "xxh3": "0xEF18B4A9E2386169",
+        "program_id": "Zelda64Recompiled",
+        "game_id": "mm.n64.us.1.0",
+        "edition": "norte-americana (USA) 1.0",
+        "region": "E",
+        "revision": 0,
+        "name_hint": "zelda"
+      },
+      "saves": [],
+      "cover_files": [],
+      "cover_urls": ["https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%2064/Named_Boxarts/Legend%20of%20Zelda%2C%20The%20-%20Majora%27s%20Mask%20(USA).png"],
+      "serial": "NUS-NZSE-USA",
+      "guide": [
+        "Você precisa do cartucho original de Majora's Mask norte-americano (NTSC-U).",
+        "Ligue um leitor de cartuchos de N64 ao PC e copie o cartucho para um arquivo .z64.",
+        "Escolha o arquivo aqui no RecompHUB. Ele confere se é exatamente a versão USA 1.0 e explica o que estiver diferente."
+      ],
+      "guide_links": [
+        { "label": "Sanni Cart Reader (leitor de cartuchos aberto)", "url": "https://github.com/sanni/cartreader" },
+        { "label": "Instruções do Zelda 64: Recompiled", "url": "https://github.com/Zelda64Recomp/Zelda64Recomp#readme" }
+      ]
+    },
+    {
+      "id": "dk64",
+      "title": "Donkey Kong 64",
+      "family": "N64",
+      "tags": ["n64", "plataforma"],
+      "port_name": "Donkey Kong 64: Recompiled",
+      "port_authors": "Rainchus e colaboradores (N64: Recompiled)",
+      "project_url": "https://github.com/Rainchus/Donkey-Kong-64-Recompiled",
+      "repo": "Rainchus/Donkey-Kong-64-Recompiled",
+      "asset_prefix": "DK64Recompiled-Windows",
+      "asset_suffix": ".zip",
+      "exe": "DK64Recompiled.exe",
+      "icon": "DK64Recompiled.exe",
+      "markers": ["DK64Recompiled.exe"],
+      "keep_on_update": ["portable.txt"],
+      "requirements": "Windows 10/11 64-bit e placa de vídeo com Direct3D 12 ou Vulkan 1.2.",
+      "needs": "O arquivo da ROM da sua própria cópia: Donkey Kong 64 norte-americano (USA).",
+      "files_help": "A ROM é a cópia do cartucho de N64, feita com um leitor de cartuchos. Formatos aceitos: .z64, .n64 e .v64 (não compactado).",
+      "files": {
+        "kind": "n64_rom",
+        "xxh3": "0x4D876060F09B3FC5",
+        "program_id": "DK64Recompiled",
+        "game_id": "DK64",
+        "edition": "norte-americana (USA)",
+        "region": "E",
+        "revision": 0,
+        "name_hint": "donkey"
+      },
+      "saves": [],
+      "cover_files": [],
+      "cover_urls": ["https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%2064/Named_Boxarts/Donkey%20Kong%2064%20(USA).png"],
+      "serial": "NUS-NDOE-USA",
+      "guide": [
+        "Você precisa do cartucho original de Donkey Kong 64 norte-americano (NTSC-U).",
+        "Ligue um leitor de cartuchos de N64 ao PC e copie o cartucho para um arquivo .z64.",
+        "Escolha o arquivo aqui no RecompHUB. Ele confere se é exatamente a versão USA e explica o que estiver diferente."
+      ],
+      "guide_links": [
+        { "label": "Sanni Cart Reader (leitor de cartuchos aberto)", "url": "https://github.com/sanni/cartreader" },
+        { "label": "Instruções do Donkey Kong 64: Recompiled", "url": "https://github.com/Rainchus/Donkey-Kong-64-Recompiled#readme" }
+      ]
+    },
+    {
+      "id": "hm64",
+      "title": "Harvest Moon 64",
+      "family": "N64",
+      "tags": ["n64", "simulação"],
+      "port_name": "Harvest Moon 64: Recompiled",
+      "port_authors": "equipe HarvestMoon64Recomp (N64: Recompiled)",
+      "project_url": "https://github.com/HarvestMoon64Recomp/HarvestMoon64Recomp",
+      "repo": "HarvestMoon64Recomp/HarvestMoon64Recomp",
+      "asset_prefix": "HarvestMoon64Recompiled-",
+      "asset_suffix": "-Windows.zip",
+      "exe": "HarvestMoon64Recompiled.exe",
+      "icon": "HarvestMoon64Recompiled.exe",
+      "markers": ["HarvestMoon64Recompiled.exe"],
+      "keep_on_update": ["portable.txt"],
+      "requirements": "Windows 10/11 64-bit e placa de vídeo com Direct3D 12 ou Vulkan 1.2.",
+      "needs": "O arquivo da ROM da sua própria cópia: Harvest Moon 64 norte-americano (USA).",
+      "files_help": "A ROM é a cópia do cartucho de N64, feita com um leitor de cartuchos. Formatos aceitos: .z64, .n64 e .v64 (não compactado).",
+      "files": {
+        "kind": "n64_rom",
+        "xxh3": "0x68B2C3755C527305",
+        "program_id": "HarvestMoon64Recompiled",
+        "game_id": "harvest_moon_64",
+        "edition": "norte-americana (USA)",
+        "region": "E",
+        "revision": 0,
+        "name_hint": "harvest"
+      },
+      "saves": [],
+      "cover_files": [],
+      "cover_urls": ["https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%2064/Named_Boxarts/Harvest%20Moon%2064%20(USA).png"],
+      "serial": "NUS-NYWE-USA",
+      "guide": [
+        "Você precisa do cartucho original de Harvest Moon 64 norte-americano (NTSC-U).",
+        "Ligue um leitor de cartuchos de N64 ao PC e copie o cartucho para um arquivo .z64.",
+        "Escolha o arquivo aqui no RecompHUB. Ele confere se é exatamente a versão USA e explica o que estiver diferente."
+      ],
+      "guide_links": [
+        { "label": "Sanni Cart Reader (leitor de cartuchos aberto)", "url": "https://github.com/sanni/cartreader" },
+        { "label": "Instruções do Harvest Moon 64: Recompiled", "url": "https://github.com/HarvestMoon64Recomp/HarvestMoon64Recomp#readme" }
+      ]
+    }
+  ]
+}

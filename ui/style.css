@@ -102,6 +102,10 @@ h1 { margin: 0 0 16px; font-size: 22px; }
 .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
 .tabs button { background: transparent; border-color: transparent; color: var(--muted); }
 .tabs button.on { background: var(--panel-2); border-color: var(--line); color: var(--text); }
+#search {
+  margin-left: auto; min-width: 220px; font: inherit; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+}
 .tagbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
 .tagbar:empty { display: none; }
 .tag {

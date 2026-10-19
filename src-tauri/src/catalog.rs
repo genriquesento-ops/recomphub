@@ -1,136 +1,268 @@
-//! The games RecompHUB knows. Each entry describes where the port is published, how to
-//! recognise an installed copy and what the player has to provide from their own copy.
+//! The games RecompHUB knows, read from catalog.json (the copy built into RecompHUB, or a
+//! newer revision downloaded from the project's repository). Each entry says where the
+//! port is published, how to recognise an installed copy, and how to check the files the
+//! player provides from their own copy. Adding a port is a data change, not a code change.
 
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
-    /// God of War III Remastered (gow3_pc): the player provides a PS4 dump folder.
-    Gow3,
-    /// Banjo-Kazooie (Banjo: Recompiled): the player provides a ROM file.
-    Banjo,
-}
+/// The catalog built into this version of RecompHUB.
+pub const BUILTIN: &str = include_str!("../catalog.json");
+/// Format this version understands; catalogs of a newer format are ignored.
+pub const FORMAT: u32 = 1;
 
 /// A page that helps the player make their own copy of the game files.
-#[derive(serde::Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct GuideLink {
-    pub label: &'static str,
-    pub url: &'static str,
+    pub label: String,
+    pub url: String,
 }
 
+/// How the files from the player's own copy are checked.
+#[derive(Deserialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Verifier {
+    /// An N64: Recompiled port: the player picks a ROM, RecompHUB checks it the way the
+    /// port does (XXH3 of the .z64 byte order) and copies it where the port looks for it.
+    N64Rom {
+        /// XXH3-64 from the port's own source (GameEntry::rom_hash), as "0x…".
+        xxh3: String,
+        /// Folder name under %LOCALAPPDATA% (programconfig program_id).
+        program_id: String,
+        /// The stored ROM is "<game_id>.z64" (GameEntry::stored_filename).
+        game_id: String,
+        /// Words for messages, such as "norte-americana (USA) 1.0".
+        edition: String,
+        /// Header country code of the right ROM ('E' is USA) and its revision byte.
+        region: String,
+        revision: u8,
+        /// Lowercase word expected in the ROM's internal name, to tell another game apart.
+        name_hint: String,
+    },
+    /// A PS4 game: the player picks the dump folder; RecompHUB checks param.sfo and writes
+    /// the folder into the port's own settings file.
+    Ps4Dump {
+        title_ids: Vec<String>,
+        tested_versions: Vec<String>,
+        settings_file: String,
+        game_dir_key: String,
+        #[serde(default)]
+        update_dir_key: Option<String>,
+        #[serde(default)]
+        user_dir_key: Option<String>,
+    },
+    /// Nothing to provide (a free game).
+    None,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct GameDef {
-    pub id: &'static str,
-    pub kind: Kind,
-    pub title: &'static str,
-    pub family: &'static str,
-    pub port_name: &'static str,
-    pub port_authors: &'static str,
-    pub project_url: &'static str,
+    pub id: String,
+    pub title: String,
+    pub family: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub port_name: String,
+    pub port_authors: String,
+    pub project_url: String,
     /// GitHub "owner/name" of the official project.
-    pub repo: &'static str,
+    pub repo: String,
     /// The Windows asset of a release: its name starts and ends with these.
-    pub asset_prefix: &'static str,
-    pub asset_suffix: &'static str,
+    pub asset_prefix: String,
+    pub asset_suffix: String,
     /// Started by the Play button (relative to the install folder).
-    pub exe: &'static str,
+    pub exe: String,
     /// Icon for shortcuts (relative to the install folder; an .exe uses its own icon).
-    pub icon: &'static str,
+    pub icon: String,
     /// Files whose presence identifies an installed copy of this port.
-    pub markers: &'static [&'static str],
+    pub markers: Vec<String>,
     /// Files kept from the old copy when updating (paths or folder prefixes, with '/').
-    pub keep_on_update: &'static [&'static str],
-    /// "folder" or "file": what the player picks when providing the game files.
-    pub files_kind: &'static str,
-    pub needs: &'static str,
-    pub files_help: &'static str,
-    pub requirements: &'static str,
-    /// "Como obter seus arquivos": steps to copy the game from the player's own copy.
-    pub guide: &'static [&'static str],
-    pub guide_links: &'static [GuideLink],
+    #[serde(default)]
+    pub keep_on_update: Vec<String>,
+    pub requirements: String,
+    pub needs: String,
+    pub files_help: String,
+    pub files: Verifier,
+    /// Where saves live, as path templates (see `expand`); the first that exists is opened.
+    #[serde(default)]
+    pub saves: Vec<String>,
+    /// Pictures in the port's folder that can serve as cover.
+    #[serde(default)]
+    pub cover_files: Vec<String>,
     /// Curated cover addresses, tried before the player's own templates.
-    pub cover_urls: &'static [&'static str],
+    #[serde(default)]
+    pub cover_urls: Vec<String>,
+    /// Serial for ${serial} cover templates, when the files do not tell it.
+    #[serde(default)]
+    pub serial: Option<String>,
+    #[serde(default)]
+    pub guide: Vec<String>,
+    #[serde(default)]
+    pub guide_links: Vec<GuideLink>,
 }
 
-pub const GAMES: &[GameDef] = &[
-    GameDef {
-        id: "gow3",
-        kind: Kind::Gow3,
-        title: "God of War III Remastered",
-        family: "PS4",
-        port_name: "gow3_pc",
-        port_authors: "FelipePrado0 e colaboradores",
-        project_url: "https://github.com/FelipePrado0/gow3_pc",
-        repo: "FelipePrado0/gow3_pc",
-        asset_prefix: "gow3-windows",
-        asset_suffix: ".zip",
-        exe: "Play God of War III.exe",
-        icon: "launcher/gow3.ico",
-        markers: &["Play God of War III.exe", "bin/gow3-probe.exe"],
-        keep_on_update: &["gow3.ini", "user/"],
-        files_kind: "folder",
-        needs: "A pasta com o dump da sua própria cópia de PS4 (a que tem eboot.bin, sce_module e sce_sys).",
-        files_help: "O dump é feito no seu PS4 com o jogo instalado. Versões testadas pelo port: CUSA01623 e CUSA01715, versões 01.00 e 01.02.",
-        requirements: "Windows 10/11 64-bit, processador com AVX e placa de vídeo com Vulkan 1.3.",
-        guide: &[
-            "Você precisa de um PS4 com o God of War III Remastered instalado: do disco ou comprado na sua conta.",
-            "Com uma ferramenta de dump para PS4, copie o jogo instalado para um HD externo. O resultado é uma pasta com eboot.bin, sce_module e sce_sys.",
-            "Se o seu PS4 tiver a atualização 01.02, copie também a pasta da atualização: o port aceita as duas versões.",
-            "Passe a pasta para o PC e escolha-a aqui no RecompHUB. Ele confere o código do jogo e a versão.",
-        ],
-        guide_links: &[GuideLink {
-            label: "Instruções do gow3_pc",
-            url: "https://github.com/FelipePrado0/gow3_pc#download-and-play",
-        }],
-        // The cover comes from the player's own dump (sce_sys/icon0.png).
-        cover_urls: &[],
-    },
-    GameDef {
-        id: "banjo",
-        kind: Kind::Banjo,
-        title: "Banjo-Kazooie",
-        family: "N64",
-        port_name: "Banjo: Recompiled",
-        port_authors: "equipe Banjo: Recompiled (N64: Recompiled)",
-        project_url: "https://github.com/BanjoRecomp/BanjoRecomp",
-        repo: "BanjoRecomp/BanjoRecomp",
-        asset_prefix: "BanjoRecompiled-",
-        asset_suffix: "-Windows.zip",
-        exe: "BanjoRecompiled.exe",
-        icon: "BanjoRecompiled.exe",
-        markers: &["BanjoRecompiled.exe"],
-        keep_on_update: &["portable.txt"],
-        files_kind: "file",
-        needs: "O arquivo da ROM da sua própria cópia: Banjo-Kazooie norte-americano (USA), versão 1.0.",
-        files_help: "A ROM é a cópia do cartucho de N64, feita com um leitor de cartuchos. Formatos aceitos: .z64, .n64 e .v64 (não compactado).",
-        requirements: "Windows 10/11 64-bit e placa de vídeo com Direct3D 12 ou Vulkan 1.2.",
-        guide: &[
-            "Você precisa do cartucho original do Banjo-Kazooie norte-americano (NTSC-U).",
-            "Ligue um leitor de cartuchos de N64 ao PC e copie o cartucho para um arquivo .z64.",
-            "Escolha o arquivo aqui no RecompHUB. Ele confere se é exatamente a versão USA 1.0 e explica o que estiver diferente.",
-        ],
-        guide_links: &[
-            GuideLink { label: "Sanni Cart Reader (leitor de cartuchos aberto)", url: "https://github.com/sanni/cartreader" },
-            GuideLink { label: "Instruções do Banjo: Recompiled", url: "https://github.com/BanjoRecomp/BanjoRecomp#readme" },
-        ],
-        // libretro-thumbnails, the box art set RetroArch downloads.
-        cover_urls: &["https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%2064/Named_Boxarts/Banjo-Kazooie%20(USA).png"],
-    },
-];
-
-pub fn get(id: &str) -> Option<&'static GameDef> {
-    GAMES.iter().find(|g| g.id == id)
+#[derive(Deserialize)]
+pub struct Catalog {
+    pub format: u32,
+    pub revision: u32,
+    pub ports: Vec<GameDef>,
 }
 
 impl GameDef {
     pub fn matches(&self, dir: &Path) -> bool {
         self.markers.iter().all(|m| dir.join(m).is_file())
     }
+
+    /// "folder" or "file": what the player picks when providing the game files.
+    pub fn files_kind(&self) -> &'static str {
+        match self.files {
+            Verifier::Ps4Dump { .. } => "folder",
+            Verifier::N64Rom { .. } => "file",
+            Verifier::None => "",
+        }
+    }
+
+    /// Every address the game page may open.
+    pub fn links(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.project_url.as_str()).chain(self.guide_links.iter().map(|l| l.url.as_str()))
+    }
+}
+
+/// A relative path that stays inside its folder.
+fn safe_relative(p: &str) -> bool {
+    let path = Path::new(p);
+    !p.is_empty()
+        && !path.is_absolute()
+        && !p.contains(':')
+        && path.components().all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+fn slug(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Everything RecompHUB relies on before trusting an entry, most of all for a catalog
+/// that came over the network.
+pub fn validate(g: &GameDef) -> Result<(), String> {
+    let err = |what: &str| Err(format!("{}: {what}", g.id));
+    if !slug(&g.id) || g.id.starts_with("pc-") {
+        return err("id inválido");
+    }
+    let repo_ok = g.repo.split('/').count() == 2
+        && g.repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c))
+        && !g.repo.contains("..");
+    if !repo_ok {
+        return err("repo inválido");
+    }
+    if !g.links().chain(g.cover_urls.iter().map(String::as_str)).all(|u| u.starts_with("https://")) {
+        return err("links precisam ser https");
+    }
+    if g.markers.is_empty() || !g.markers.iter().all(|m| safe_relative(m)) {
+        return err("markers inválidos");
+    }
+    let rel_ok = |list: &[String]| list.iter().all(|p| safe_relative(p.trim_end_matches('/')));
+    if !safe_relative(&g.exe) || !safe_relative(&g.icon) || !rel_ok(&g.keep_on_update) || !rel_ok(&g.cover_files) {
+        return err("caminho fora da pasta do port");
+    }
+    if !g.exe.to_lowercase().ends_with(".exe") || g.asset_prefix.is_empty() || !g.asset_suffix.ends_with(".zip") {
+        return err("programa ou arquivo de release inválido");
+    }
+    if !g.saves.iter().all(|s| expand(s, Some(Path::new("C:\\x"))).is_some()) {
+        return err("pasta de saves inválida");
+    }
+    match &g.files {
+        Verifier::N64Rom { xxh3, program_id, game_id, region, .. } => {
+            if parse_hash(xxh3).is_none() {
+                return err("xxh3 inválido");
+            }
+            let name_ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
+            if !name_ok(program_id) || !name_ok(game_id) || region.len() != 1 {
+                return err("dados da ROM inválidos");
+            }
+        }
+        Verifier::Ps4Dump { title_ids, settings_file, .. } => {
+            if title_ids.is_empty() || expand(settings_file, None).is_none() {
+                return err("dados do dump inválidos");
+            }
+        }
+        Verifier::None => {}
+    }
+    Ok(())
+}
+
+pub fn parse_hash(s: &str) -> Option<u64> {
+    u64::from_str_radix(s.trim().trim_start_matches("0x").trim_start_matches("0X"), 16).ok()
+}
+
+/// Parses and validates a whole catalog. Entries that fail are left out, never trusted.
+pub fn parse(text: &str) -> Result<(u32, Vec<GameDef>, Vec<String>), String> {
+    let c: Catalog = serde_json::from_str(text).map_err(|e| format!("catálogo ilegível: {e}"))?;
+    if c.format != FORMAT {
+        return Err(format!("formato {} não suportado", c.format));
+    }
+    let mut ok: Vec<GameDef> = Vec::new();
+    let mut rejected = Vec::new();
+    for g in c.ports {
+        match validate(&g) {
+            Ok(()) if !ok.iter().any(|o| o.id == g.id) => ok.push(g),
+            Ok(()) => rejected.push(format!("{}: id repetido", g.id)),
+            Err(e) => rejected.push(e),
+        }
+    }
+    Ok((c.revision, ok, rejected))
+}
+
+/// Path templates in the catalog: %APPDATA%, %LOCALAPPDATA%, %USERPROFILE% and {install}.
+/// Anything else is refused, so a catalog cannot point at arbitrary places.
+pub fn expand(template: &str, install: Option<&Path>) -> Option<PathBuf> {
+    let mut s = template.to_string();
+    for var in ["APPDATA", "LOCALAPPDATA", "USERPROFILE"] {
+        let key = format!("%{var}%");
+        if s.contains(&key) {
+            let value = std::env::var(var).ok()?;
+            s = s.replace(&key, &value);
+        }
+    }
+    if s.contains("{install}") {
+        s = s.replace("{install}", &install?.display().to_string());
+    }
+    if s.contains('%') || s.contains('{') || s.contains("..") || !Path::new(&s).is_absolute() {
+        return None;
+    }
+    Some(PathBuf::from(s))
+}
+
+struct Current {
+    revision: u32,
+    games: &'static [GameDef],
+}
+
+static CURRENT: RwLock<Option<Current>> = RwLock::new(None);
+
+/// Installs a catalog. Each one is kept for the life of the program (a few kilobytes,
+/// replaced at most once per start) so references to its entries stay valid.
+pub fn install(revision: u32, games: Vec<GameDef>) {
+    let games: &'static [GameDef] = Box::leak(games.into_boxed_slice());
+    *CURRENT.write().unwrap() = Some(Current { revision, games });
+}
+
+pub fn revision() -> u32 {
+    CURRENT.read().unwrap().as_ref().map(|c| c.revision).unwrap_or(0)
+}
+
+pub fn games() -> &'static [GameDef] {
+    CURRENT.read().unwrap().as_ref().map(|c| c.games).unwrap_or(&[])
+}
+
+pub fn get(id: &str) -> Option<&'static GameDef> {
+    games().iter().find(|g| g.id == id)
 }
 
 /// Which port is in `dir`: the folder itself, or one folder below it (the player often
 /// picks the folder that contains the port's folder).
-pub fn identify(dir: &Path) -> Option<(&'static GameDef, std::path::PathBuf)> {
-    for g in GAMES {
+pub fn identify(dir: &Path) -> Option<(&'static GameDef, PathBuf)> {
+    for g in games() {
         if g.matches(dir) {
             return Some((g, dir.to_path_buf()));
         }
@@ -141,11 +273,40 @@ pub fn identify(dir: &Path) -> Option<(&'static GameDef, std::path::PathBuf)> {
         if !p.is_dir() {
             continue;
         }
-        for g in GAMES {
+        for g in games() {
             if g.matches(&p) {
                 return Some((g, p));
             }
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_catalog_is_valid() {
+        let (revision, games, rejected) = parse(BUILTIN).expect("catalog.json parses");
+        assert!(rejected.is_empty(), "entradas recusadas: {rejected:?}");
+        assert!(revision >= 1);
+        assert!(games.len() >= 2);
+    }
+
+    #[test]
+    fn templates_stay_in_known_places() {
+        assert!(expand("{install}\\user", Some(Path::new("C:\\Games\\gow3"))).is_some());
+        assert!(expand("%TEMP%\\x", None).is_none());
+        assert!(expand("{install}\\..\\..\\Windows", Some(Path::new("C:\\g"))).is_none());
+        assert!(expand("relative\\path", None).is_none());
+    }
+
+    #[test]
+    fn relative_paths_cannot_escape() {
+        assert!(safe_relative("bin/gow3-probe.exe"));
+        assert!(!safe_relative("../evil.exe"));
+        assert!(!safe_relative("C:\\Windows\\x.exe"));
+        assert!(!safe_relative("\\x.exe"));
+    }
 }

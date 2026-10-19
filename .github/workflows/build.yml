@@ -31,6 +31,9 @@ jobs:
       - name: Make icons
         run: npx tauri icon app-icon.png
 
+      - name: Run tests (catalog, ROM and dump checks)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Build installer
         run: npx tauri build
 

@@ -59,7 +59,7 @@ pub async fn latest(game: &GameDef) -> Result<Release, String> {
         let Some(asset) = r
             .assets
             .iter()
-            .find(|a| a.name.starts_with(game.asset_prefix) && a.name.ends_with(game.asset_suffix))
+            .find(|a| a.name.starts_with(game.asset_prefix.as_str()) && a.name.ends_with(game.asset_suffix.as_str()))
         else {
             continue;
         };

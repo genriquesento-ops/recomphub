@@ -1,4 +1,5 @@
 mod catalog;
+mod catalog_sync;
 mod covers;
 mod files;
 mod github;
@@ -49,9 +50,11 @@ struct GameView {
     files_help: &'static str,
     files_kind: &'static str,
     requirements: &'static str,
-    guide: &'static [&'static str],
+    guide: &'static [String],
     guide_links: &'static [catalog::GuideLink],
     tags: Vec<String>,
+    /// The catalog's own tags (platform, genre), for the Descobrir tab.
+    catalog_tags: &'static [String],
     /// "not_installed", "needs_files", "ready", "starting", "running" or "installing"
     status: &'static str,
     /// Unix time the running session started.
@@ -102,13 +105,13 @@ fn modified(path: &Path) -> Option<u64> {
 }
 
 fn view(state: &AppState, game: &'static GameDef) -> GameView {
-    let entry = state.library.lock().unwrap().games.get(game.id).cloned();
-    let latest = state.latest.lock().unwrap().get(game.id).cloned();
+    let entry = state.library.lock().unwrap().games.get(game.id.as_str()).cloned();
+    let latest = state.latest.lock().unwrap().get(game.id.as_str()).cloned();
     let (running, launching, session_started) = {
         let s = state.sessions.lock().unwrap();
-        (s.is_running(game.id), s.is_launching(game.id), s.started(game.id))
+        (s.is_running(game.id.as_str()), s.is_launching(game.id.as_str()), s.started(game.id.as_str()))
     };
-    let installing = state.installing.lock().unwrap().contains(game.id);
+    let installing = state.installing.lock().unwrap().contains(game.id.as_str());
 
     let dir = entry.as_ref().map(|e| PathBuf::from(&e.install_dir));
     let installed = dir.as_deref().map(|d| game.matches(d)).unwrap_or(false);
@@ -118,14 +121,14 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         (Some(e), Some(l), true) => match &e.version {
             Some(v) => v != &l.tag,
             // Added from a folder: newer if the release came out a day after the copy's program.
-            None => modified(&dir.as_ref().unwrap().join(game.exe))
+            None => modified(&dir.as_ref().unwrap().join(&game.exe))
                 .map(|m| l.published > m + 86_400)
                 .unwrap_or(false),
         },
         _ => false,
     };
 
-    let (cover, cover_source) = pick_cover(state, game.id, files::cover(game, dir.as_deref().filter(|_| installed)));
+    let (cover, cover_source) = pick_cover(state, &game.id, files::cover(game, dir.as_deref().filter(|_| installed)));
 
     let status = if installing {
         "installing"
@@ -145,16 +148,17 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         id: game.id.to_string(),
         kind: "port",
         title: game.title.to_string(),
-        family: game.family,
-        port_name: game.port_name,
-        port_authors: game.port_authors,
-        project_url: game.project_url,
-        needs: game.needs,
-        files_help: game.files_help,
-        files_kind: game.files_kind,
-        requirements: game.requirements,
-        guide: game.guide,
-        guide_links: game.guide_links,
+        family: game.family.as_str(),
+        port_name: game.port_name.as_str(),
+        port_authors: game.port_authors.as_str(),
+        project_url: game.project_url.as_str(),
+        needs: game.needs.as_str(),
+        files_help: game.files_help.as_str(),
+        files_kind: game.files_kind(),
+        requirements: game.requirements.as_str(),
+        guide: &game.guide,
+        guide_links: &game.guide_links,
+        catalog_tags: &game.tags,
         tags: entry.as_ref().map(|e| e.tags.clone()).unwrap_or_default(),
         status,
         session_started,
@@ -203,6 +207,7 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         requirements: "",
         guide: &[],
         guide_links: &[],
+        catalog_tags: &[],
         tags: entry.tags.clone(),
         status,
         session_started,
@@ -247,7 +252,7 @@ fn save(state: &AppState) -> Result<(), String> {
 #[tauri::command]
 fn get_library(app: AppHandle) -> Vec<GameView> {
     let state = app.state::<AppState>();
-    let mut list: Vec<GameView> = catalog::GAMES.iter().map(|g| view(&state, g)).collect();
+    let mut list: Vec<GameView> = catalog::games().iter().map(|g| view(&state, g)).collect();
     let pc: Vec<(String, library::Entry)> = state
         .library
         .lock()
@@ -300,7 +305,7 @@ async fn add_pc_game(app: AppHandle) -> Result<Option<GameView>, String> {
     // A catalog port gets its full page (files check, updates) instead.
     if let Some((game, port_dir)) = catalog::identify(&dir) {
         let state = app.state::<AppState>();
-        state.library.lock().unwrap().add(game.id, &port_dir, None);
+        state.library.lock().unwrap().add(&game.id, &port_dir, None);
         save(&state)?;
         return Ok(Some(view(&state, game)));
     }
@@ -444,9 +449,7 @@ fn set_cover_templates(app: AppHandle, lines: Vec<String>) -> Result<Vec<String>
 #[tauri::command]
 fn open_link(app: AppHandle, url: String) -> Result<(), String> {
     // Only pages the catalog lists: never an address from elsewhere.
-    let known = catalog::GAMES
-        .iter()
-        .any(|g| g.project_url == url || g.guide_links.iter().any(|l| l.url == url));
+    let known = catalog::games().iter().any(|g| g.links().any(|l| l == url));
     if !known {
         return Err("Link fora do catálogo.".into());
     }
@@ -456,7 +459,11 @@ fn open_link(app: AppHandle, url: String) -> Result<(), String> {
 /// Asks each project's GitHub page for its newest release. Offline is not an error here.
 #[tauri::command]
 async fn check_updates(app: AppHandle) -> Vec<GameView> {
-    for game in catalog::GAMES {
+    // A newer catalog from the project's repository first, so new ports are checked too.
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = catalog_sync::refresh(&dir).await;
+    }
+    for game in catalog::games() {
         if let Ok(release) = github::latest(game).await {
             app.state::<AppState>().latest.lock().unwrap().insert(game.id.to_string(), release);
         }
@@ -487,15 +494,14 @@ async fn add_existing(app: AppHandle) -> Result<Option<GameView>, String> {
         return Ok(None);
     };
     let Some((game, port_dir)) = catalog::identify(&dir) else {
-        let names: Vec<_> = catalog::GAMES.iter().map(|g| format!("{} ({})", g.title, g.port_name)).collect();
+        let names: Vec<_> = catalog::games().iter().map(|g| format!("{} ({})", g.title, g.port_name)).collect();
         return Err(format!(
-            "Não reconheci nenhum port nesta pasta. Os jogos suportados são: {}. Escolha a pasta onde está o programa do port (por exemplo, \"{}\").",
-            names.join(", "),
-            catalog::GAMES[0].exe
+            "Não reconheci nenhum port nesta pasta. Os jogos do catálogo são: {}. Escolha a pasta onde está o programa do port.",
+            names.join(", ")
         ));
     };
     let state = app.state::<AppState>();
-    state.library.lock().unwrap().add(game.id, &port_dir, None);
+    state.library.lock().unwrap().add(&game.id, &port_dir, None);
     save(&state)?;
     Ok(Some(view(&state, game)))
 }
@@ -506,7 +512,7 @@ async fn install_game(app: AppHandle, id: String) -> Result<GameView, String> {
     let game = game_or_err(&id)?;
     {
         let state = app.state::<AppState>();
-        if state.sessions.lock().unwrap().is_running(game.id) {
+        if state.sessions.lock().unwrap().is_running(game.id.as_str()) {
             return Err("Feche o jogo antes de atualizar.".into());
         }
         if !state.installing.lock().unwrap().insert(game.id.to_string()) {
@@ -515,7 +521,7 @@ async fn install_game(app: AppHandle, id: String) -> Result<GameView, String> {
     }
     let result = install_inner(&app, game).await;
     let state = app.state::<AppState>();
-    state.installing.lock().unwrap().remove(game.id);
+    state.installing.lock().unwrap().remove(game.id.as_str());
     result?;
     Ok(view(&state, game))
 }
@@ -524,15 +530,15 @@ async fn install_inner(app: &AppHandle, game: &'static GameDef) -> Result<(), St
     let release = github::latest(game).await?;
     app.state::<AppState>().latest.lock().unwrap().insert(game.id.to_string(), release.clone());
 
-    let existing = app.state::<AppState>().library.lock().unwrap().install_dir(game.id);
+    let existing = app.state::<AppState>().library.lock().unwrap().install_dir(game.id.as_str());
     let target = match existing {
         Some(d) if game.matches(&d) => d,
-        _ => app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("games").join(game.id),
+        _ => app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("games").join(game.id.as_str()),
     };
     install::install(app, game, &release, &target).await?;
 
     let state = app.state::<AppState>();
-    state.library.lock().unwrap().add(game.id, &target, Some(release.tag));
+    state.library.lock().unwrap().add(&game.id, &target, Some(release.tag));
     save(&state)
 }
 
@@ -546,9 +552,9 @@ async fn provide_files(app: AppHandle, id: String) -> Result<Option<FilesStatus>
         .library
         .lock()
         .unwrap()
-        .install_dir(game.id)
+        .install_dir(game.id.as_str())
         .ok_or("Instale o jogo primeiro.")?;
-    let picked = if game.files_kind == "folder" {
+    let picked = if game.files_kind() == "folder" {
         pick_folder(&app, "Escolha a pasta com o dump do jogo")
     } else {
         pick_file(&app, "Escolha o arquivo da ROM")
@@ -610,7 +616,7 @@ fn create_shortcut(app: AppHandle, id: String, location: String) -> Result<Strin
     };
     let (title, icon) = match catalog::get(&id) {
         Some(game) => {
-            let icon = Some(dir.join(game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(game.exe));
+            let icon = Some(dir.join(&game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(&game.exe));
             (game.title.to_string(), icon)
         }
         // A PC game's program carries its own icon.
@@ -655,7 +661,7 @@ fn remove_game(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 fn open_project(app: AppHandle, id: String) -> Result<(), String> {
     let game = game_or_err(&id)?;
-    app.opener().open_url(game.project_url, None::<&str>).map_err(|e| e.to_string())
+    app.opener().open_url(&game.project_url, None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -680,6 +686,7 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            catalog_sync::load_startup(&dir);
             let library_path = dir.join("library.json");
             let settings_path = dir.join("settings.json");
             app.manage(AppState {
