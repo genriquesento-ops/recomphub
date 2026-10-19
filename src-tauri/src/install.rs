@@ -26,6 +26,7 @@ fn emit(app: &AppHandle, id: &str, stage: &str, done: u64, total: u64) {
 /// Downloads `release` into `target`, keeping the player's files listed in `keep_on_update`.
 pub async fn install(app: &AppHandle, game: &GameDef, release: &Release, target: &Path) -> Result<(), String> {
     std::fs::create_dir_all(target).map_err(|e| format!("Não consegui criar a pasta {}: {e}", target.display()))?;
+    check_space(target, release.asset_size)?;
     let zip_path = target.with_file_name(format!("{}.download.zip", game.id));
     let result = download_and_extract(app, game, release, target, &zip_path).await;
     let _ = std::fs::remove_file(&zip_path);
@@ -134,6 +135,30 @@ fn extract(app: &AppHandle, id: &str, zip_path: &Path, target: &Path, keep: &[&s
     }
     emit(app, id, "extract", total, total);
     Ok(())
+}
+
+/// The download plus the unpacked port need about three times the zip's size.
+fn check_space(target: &Path, zip_size: u64) -> Result<(), String> {
+    let needed = zip_size.saturating_mul(3);
+    let target = target.to_string_lossy().to_lowercase();
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let disk = disks
+        .list()
+        .iter()
+        .filter(|d| target.starts_with(&d.mount_point().to_string_lossy().to_lowercase()))
+        .max_by_key(|d| d.mount_point().as_os_str().len());
+    match disk {
+        Some(d) if d.available_space() < needed => {
+            let gb = |b: u64| format!("{:.1} GB", b as f64 / 1_073_741_824.0);
+            Err(format!(
+                "Falta espaço no disco {}: são necessários {} e há {} livres.",
+                d.mount_point().display(),
+                gb(needed),
+                gb(d.available_space())
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The single top-level folder every entry is inside, if there is one.

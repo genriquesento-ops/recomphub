@@ -26,6 +26,8 @@ pub struct GameDef {
     pub asset_suffix: &'static str,
     /// Started by the Play button (relative to the install folder).
     pub exe: &'static str,
+    /// Icon for shortcuts (relative to the install folder; an .exe uses its own icon).
+    pub icon: &'static str,
     /// Files whose presence identifies an installed copy of this port.
     pub markers: &'static [&'static str],
     /// Files kept from the old copy when updating (paths or folder prefixes, with '/').
@@ -50,6 +52,7 @@ pub const GAMES: &[GameDef] = &[
         asset_prefix: "gow3-windows",
         asset_suffix: ".zip",
         exe: "Play God of War III.exe",
+        icon: "launcher/gow3.ico",
         markers: &["Play God of War III.exe", "bin/gow3-probe.exe"],
         keep_on_update: &["gow3.ini", "user/"],
         files_kind: "folder",
@@ -69,6 +72,7 @@ pub const GAMES: &[GameDef] = &[
         asset_prefix: "BanjoRecompiled-",
         asset_suffix: "-Windows.zip",
         exe: "BanjoRecompiled.exe",
+        icon: "BanjoRecompiled.exe",
         markers: &["BanjoRecompiled.exe"],
         keep_on_update: &["portable.txt"],
         files_kind: "file",

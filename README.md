@@ -13,6 +13,22 @@ oficiais de cada projeto, e cada jogo mostra o crédito de quem fez o port.
 | God of War III Remastered | [gow3_pc](https://github.com/FelipePrado0/gow3_pc) | Pasta do dump da sua cópia de PS4 (CUSA01623 ou CUSA01715) |
 | Banjo-Kazooie | [Banjo: Recompiled](https://github.com/BanjoRecomp/BanjoRecomp) | ROM da sua cópia, versão USA 1.0 |
 
+## O que ele faz
+
+- Biblioteca com capa, status (instalado, precisa de arquivos, atualização disponível, jogando).
+- Instala e atualiza o port pela página oficial do projeto, conferindo o espaço livre em disco e,
+  quando o projeto publica, a soma SHA-256 do download.
+- Confere os arquivos da sua cópia e explica em linguagem simples o que falta.
+- Conta o tempo de jogo mesmo quando o jogo é aberto por fora do RecompHUB, salvando a cada
+  30 segundos.
+- Botão para fechar o jogo, atalhos na área de trabalho e no menu Iniciar (que abrem o jogo pelo
+  RecompHUB) e acesso à pasta de saves.
+
+Algumas ideias vieram do [Hydra Launcher](https://github.com/hydralauncher/hydra) (MIT): o
+monitor de processos para o tempo de jogo, os atalhos que passam pelo launcher, fechar o jogo e
+conferir o espaço em disco. Fontes de download de jogos, como as do Hydra, nunca farão parte do
+RecompHUB.
+
 ## Como baixar
 
 A cada envio para `main`, o GitHub Actions gera o instalador. Abra a aba **Actions**, entre no

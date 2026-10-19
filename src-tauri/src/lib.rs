@@ -4,13 +4,14 @@ mod github;
 mod install;
 mod library;
 mod play;
+mod shortcut;
 
 use base64::Engine;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -23,8 +24,10 @@ pub struct AppState {
     pub library: Mutex<Library>,
     pub library_path: PathBuf,
     pub latest: Mutex<HashMap<String, Release>>,
-    pub running: Mutex<HashSet<String>>,
+    pub sessions: Mutex<play::Sessions>,
     pub installing: Mutex<HashSet<String>>,
+    /// Game page to show, asked for by a shortcut before the page loaded.
+    pub pending_open: Mutex<Option<String>>,
 }
 
 /// Everything the interface shows about one game.
@@ -40,8 +43,10 @@ struct GameView {
     files_help: &'static str,
     files_kind: &'static str,
     requirements: &'static str,
-    /// "not_installed", "needs_files", "ready", "running" or "installing"
+    /// "not_installed", "needs_files", "ready", "starting", "running" or "installing"
     status: &'static str,
+    /// Unix time the running session started.
+    session_started: Option<u64>,
     in_library: bool,
     install_dir: Option<String>,
     version: Option<String>,
@@ -73,7 +78,10 @@ fn modified(path: &Path) -> Option<u64> {
 fn view(state: &AppState, game: &'static GameDef) -> GameView {
     let entry = state.library.lock().unwrap().games.get(game.id).cloned();
     let latest = state.latest.lock().unwrap().get(game.id).cloned();
-    let running = state.running.lock().unwrap().contains(game.id);
+    let (running, launching, session_started) = {
+        let s = state.sessions.lock().unwrap();
+        (s.is_running(game.id), s.is_launching(game.id), s.started(game.id))
+    };
     let installing = state.installing.lock().unwrap().contains(game.id);
 
     let dir = entry.as_ref().map(|e| PathBuf::from(&e.install_dir));
@@ -95,6 +103,8 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         "installing"
     } else if running {
         "running"
+    } else if launching {
+        "starting"
     } else if !installed {
         "not_installed"
     } else if files.as_ref().map(|f| f.ok).unwrap_or(false) {
@@ -115,6 +125,7 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         files_kind: game.files_kind,
         requirements: game.requirements,
         status,
+        session_started,
         in_library: entry.is_some(),
         install_dir: entry.as_ref().map(|e| e.install_dir.clone()),
         version: entry.as_ref().and_then(|e| e.version.clone()),
@@ -199,7 +210,7 @@ async fn install_game(app: AppHandle, id: String) -> Result<GameView, String> {
     let game = game_or_err(&id)?;
     {
         let state = app.state::<AppState>();
-        if state.running.lock().unwrap().contains(game.id) {
+        if state.sessions.lock().unwrap().is_running(game.id) {
             return Err("Feche o jogo antes de atualizar.".into());
         }
         if !state.installing.lock().unwrap().insert(game.id.to_string()) {
@@ -259,12 +270,67 @@ fn play(app: AppHandle, id: String) -> Result<(), String> {
     let v = view(&app.state::<AppState>(), game);
     match v.status {
         "ready" => {}
-        "running" => return Err("O jogo já está aberto.".into()),
+        "running" | "starting" => return Err("O jogo já está aberto.".into()),
         "needs_files" => return Err("Faltam os arquivos do jogo. Veja os detalhes na página do jogo.".into()),
+        "installing" => return Err("Espere a instalação terminar.".into()),
         _ => return Err("O jogo não está instalado.".into()),
     }
     let dir = PathBuf::from(v.install_dir.unwrap());
-    play::start(app, id, dir, game.exe)
+    play::start(&app, &id, &dir, game.exe)
+}
+
+#[tauri::command]
+fn stop_game(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = app.state::<AppState>().library.lock().unwrap().install_dir(&id).ok_or("Jogo fora da biblioteca.")?;
+    play::stop(&dir).map(|_| ())
+}
+
+#[tauri::command]
+fn open_saves(app: AppHandle, id: String) -> Result<(), String> {
+    let game = game_or_err(&id)?;
+    let dir = app.state::<AppState>().library.lock().unwrap().install_dir(&id).ok_or("Jogo fora da biblioteca.")?;
+    let saves = files::save_dir(game, &dir).ok_or("O jogo ainda não criou a pasta de saves. Jogue uma vez e tente de novo.")?;
+    app.opener().open_path(saves.display().to_string(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// `location`: "desktop" or "start_menu".
+#[tauri::command]
+fn create_shortcut(app: AppHandle, id: String, location: String) -> Result<String, String> {
+    let game = game_or_err(&id)?;
+    let dir = app.state::<AppState>().library.lock().unwrap().install_dir(&id).ok_or("Jogo fora da biblioteca.")?;
+    let folder = match location.as_str() {
+        "desktop" => app.path().desktop_dir().map_err(|e| e.to_string())?,
+        _ => app
+            .path()
+            .data_dir()
+            .map_err(|e| e.to_string())?
+            .join("Microsoft\\Windows\\Start Menu\\Programs\\RecompHUB"),
+    };
+    let icon = Some(dir.join(game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(game.exe));
+    shortcut::create(&folder, game.title, game.id, &icon).map(|p| p.display().to_string())
+}
+
+#[tauri::command]
+fn take_pending_open(app: AppHandle) -> Option<String> {
+    app.state::<AppState>().pending_open.lock().unwrap().take()
+}
+
+/// "--play <id>" (from a shortcut): open that game if it is ready, else show its page.
+fn handle_args(app: &AppHandle, args: &[String]) {
+    let Some(i) = args.iter().position(|a| a == "--play") else { return };
+    let Some(id) = args.get(i + 1) else { return };
+    let Some(game) = catalog::get(id) else { return };
+    let ready = view(&app.state::<AppState>(), game).status == "ready";
+    let launched = ready && play(app.clone(), id.clone()).is_ok();
+    if !launched {
+        // The page may not be loaded yet (RecompHUB just started): it asks on load.
+        *app.state::<AppState>().pending_open.lock().unwrap() = Some(id.clone());
+        let _ = app.emit("open-game", id);
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+    }
 }
 
 #[tauri::command]
@@ -289,6 +355,14 @@ fn open_folder(app: AppHandle, id: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // A shortcut opened while RecompHUB is running goes to the open window.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+            handle_args(app, &args);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -299,9 +373,13 @@ pub fn run() {
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
-                running: Mutex::new(HashSet::new()),
+                sessions: Mutex::new(play::Sessions::default()),
                 installing: Mutex::new(HashSet::new()),
+                pending_open: Mutex::new(None),
             });
+            play::spawn_watcher(app.handle().clone());
+            let args: Vec<String> = std::env::args().collect();
+            handle_args(app.handle(), &args);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -312,10 +390,19 @@ pub fn run() {
             install_game,
             provide_files,
             play,
+            stop_game,
+            open_saves,
+            create_shortcut,
+            take_pending_open,
             remove_game,
             open_project,
             open_folder
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running RecompHUB");
+        .build(tauri::generate_context!())
+        .expect("error while starting RecompHUB")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                play::flush(app);
+            }
+        });
 }

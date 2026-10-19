@@ -10,9 +10,17 @@ const STATUS_TEXT = {
   ready: 'Instalado',
   needs_files: 'Precisa de arquivos',
   not_installed: 'Não instalado',
+  starting: 'Abrindo…',
   running: 'Jogando',
   installing: 'Instalando',
 };
+
+const IN_GAME = ['starting', 'running'];
+
+function sessionLength(g) {
+  if (!g.session_started) return '';
+  return playTime(Math.floor(Date.now() / 1000) - g.session_started).toLowerCase();
+}
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -76,7 +84,8 @@ function renderGrid() {
       <div class="body">
         <div class="title">${esc(g.title)}</div>
         <div>${chips(g)}</div>
-        <div class="meta">${g.in_library ? `${playTime(g.total_seconds)} · última vez ${lastPlayed(g.last_played)}` : 'Fora da biblioteca'}</div>
+        <div class="meta">${g.status === 'running' ? `Jogando há ${sessionLength(g)}`
+          : g.in_library ? `${playTime(g.total_seconds)} · última vez ${lastPlayed(g.last_played)}` : 'Fora da biblioteca'}</div>
       </div>
     </div>`).join('');
   document.querySelectorAll('.card').forEach((el) => el.addEventListener('click', () => openGame(el.dataset.id)));
@@ -145,14 +154,30 @@ function renderDetail() {
         <div class="box warn">
           <h3>Versão nova disponível${latest ? `: ${esc(latest)}` : ''}</h3>
           <p>Seus saves e configurações são mantidos.</p>
-          <div class="row"><button data-act="install" ${g.status === 'running' ? 'disabled' : ''}>Atualizar</button></div>
+          <div class="row"><button data-act="install" ${IN_GAME.includes(g.status) ? 'disabled' : ''}>Atualizar</button></div>
         </div>`;
     }
+    if (IN_GAME.includes(g.status)) {
+      main += `
+        <div class="row">
+          <button class="primary play" disabled>${g.status === 'running' ? `Jogando há ${sessionLength(g)}` : 'Abrindo…'}</button>
+          ${g.status === 'running' ? '<button class="danger" data-act="stop">Fechar jogo</button>' : ''}
+        </div>
+        <p class="muted">O tempo é contado enquanto o port estiver aberto e salvo a cada 30 segundos.</p>`;
+    } else {
+      main += `
+        <div class="row">
+          <button class="primary play" data-act="play" ${g.status !== 'ready' ? 'disabled' : ''}>Jogar</button>
+        </div>`;
+    }
+    main += filesBox(g);
     main += `
       <div class="row">
-        <button class="primary play" data-act="play" ${g.status !== 'ready' ? 'disabled' : ''}>${g.status === 'running' ? 'Jogando…' : 'Jogar'}</button>
-      </div>`;
-    main += filesBox(g);
+        <button class="ghost" data-act="shortcut-desktop">Atalho na área de trabalho</button>
+        <button class="ghost" data-act="shortcut-start">Atalho no menu Iniciar</button>
+        <button class="ghost" data-act="saves">Abrir pasta de saves</button>
+      </div>
+      <p class="muted">Os atalhos abrem o jogo pelo RecompHUB, então o tempo de jogo continua sendo contado.</p>`;
   }
 
   $('#detail').innerHTML = `
@@ -250,6 +275,20 @@ async function act(action, g) {
       await call('play', { id: g.id });
       setGame(await call('get_game', { id: g.id }));
       break;
+    case 'stop':
+      if (!confirm(`Fechar ${g.title}? O progresso que não foi salvo no jogo será perdido.`)) break;
+      await call('stop_game', { id: g.id });
+      break;
+    case 'saves':
+      await call('open_saves', { id: g.id });
+      break;
+    case 'shortcut-desktop':
+    case 'shortcut-start': {
+      const location = action === 'shortcut-desktop' ? 'desktop' : 'start_menu';
+      await call('create_shortcut', { id: g.id, location });
+      toast(location === 'desktop' ? 'Atalho criado na área de trabalho.' : 'Atalho criado no menu Iniciar (pasta RecompHUB).');
+      break;
+    }
     case 'remove':
       await call('remove_game', { id: g.id });
       await refresh();
@@ -281,11 +320,25 @@ listen('install-progress', (e) => {
 listen('session', async (e) => {
   const { id, state, seconds } = e.payload;
   setGame(await invoke('get_game', { id }));
+  // "Abrindo…" ends after a minute if the port never showed up.
+  if (state === 'starting') setTimeout(async () => setGame(await invoke('get_game', { id })), 61000);
   if (state === 'ended' && seconds > 0) {
     const g = games.find((x) => x.id === id);
     toast(`Sessão de ${playTime(seconds).toLowerCase()} somada a ${g ? g.title : id}.`);
   }
 });
 
+listen('open-game', (e) => openGame(e.payload));
+
+// Keeps "Jogando há …" current.
+setInterval(() => {
+  if (games.some((g) => g.status === 'running')) render();
+}, 20000);
+
 // Show the library at once, then ask GitHub for new versions in the background.
-refresh().then(() => invoke('check_updates').then((list) => { games = list; render(); }).catch(() => {}));
+refresh()
+  .then(async () => {
+    const pending = await invoke('take_pending_open');
+    if (pending) openGame(pending);
+  })
+  .then(() => invoke('check_updates').then((list) => { games = list; render(); }).catch(() => {}));

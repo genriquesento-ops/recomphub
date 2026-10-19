@@ -41,6 +41,19 @@ pub fn provide(game: &GameDef, install_dir: &Path, path: &Path) -> FilesStatus {
     }
 }
 
+/// The folder where the port keeps the player's saves, when it exists.
+pub fn save_dir(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
+    let dir = match game.kind {
+        Kind::Gow3 => gow3::user_dir().unwrap_or_else(|| install_dir.join("user")),
+        Kind::Banjo => {
+            let data = banjo::data_dir(install_dir)?;
+            let saves = data.join("saves");
+            if saves.is_dir() { saves } else { data }
+        }
+    };
+    dir.is_dir().then_some(dir)
+}
+
 /// A cover picture from the player's own files or the port's folder.
 pub fn cover(game: &GameDef, install_dir: Option<&Path>) -> Option<PathBuf> {
     let mut candidates = Vec::new();
@@ -123,6 +136,11 @@ mod gow3 {
 
     pub fn game_dir() -> Option<PathBuf> {
         setting_dir("game_dir")
+    }
+
+    /// A custom "Saves folder" chosen in the port's launcher.
+    pub fn user_dir() -> Option<PathBuf> {
+        setting_dir("user_dir")
     }
 
     struct Dump {
@@ -246,7 +264,7 @@ mod banjo {
     const Z64_START: [u8; 4] = [0x80, 0x37, 0x12, 0x40];
 
     /// Where the port keeps its data: next to it with portable.txt, else %LOCALAPPDATA%.
-    fn data_dir(install_dir: &Path) -> Option<PathBuf> {
+    pub fn data_dir(install_dir: &Path) -> Option<PathBuf> {
         if install_dir.join("portable.txt").is_file() {
             return Some(install_dir.to_path_buf());
         }

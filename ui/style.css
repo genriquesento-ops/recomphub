@@ -97,7 +97,7 @@ h1 { margin: 0 0 16px; font-size: 22px; }
 .chip.ready { color: var(--ok); }
 .chip.needs_files, .chip.update { color: var(--warn); }
 .chip.not_installed { color: var(--muted); }
-.chip.running, .chip.installing { color: var(--info); }
+.chip.running, .chip.installing, .chip.starting { color: var(--info); }
 
 /* Game page */
 .back { margin-bottom: 16px; }
