@@ -13,9 +13,13 @@
 - [x] **v0.9** Aba Comunidade: ports da lista awesome-unofficial-pc-ports e dos tópicos do GitHub, instalação experimental com aviso, escolha do programa, atualização e desinstalação
 - [x] **v0.10** Arrastar e soltar a ROM ou a pasta do dump na página do jogo, botão "Procurar na pasta Downloads"
 - [x] **v0.11** Capa, banner e descrição da SteamGridDB e da IGDB com a chave do jogador, guardados no PC (busca uma vez por jogo)
+- [x] **v0.12** Perfis e Conquistas, fase 1: histórico de sessões, estado do jogo, vezes jogado, anotações, página Estatísticas
+- [ ] Fase 2: saves automáticos (backup ao fechar o jogo, limite por jogo, vigia da pasta de saves, Ludusavi)
+- [ ] Fase 3: perfis
+- [ ] Fase 4: conquistas (tempo de jogo e progresso lido do save, aviso com som)
+- [ ] Fase 5: RetroAchievements (só leitura)
 - [ ] Repositório público, para o catálogo remoto e o aviso de versão do RecompHUB funcionarem
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
-- [ ] Conquistas (v2 do SPEC)
 
 ## Testes automáticos
 
@@ -29,6 +33,7 @@ Rodam no GitHub Actions antes de gerar o instalador (`cargo test --lib`):
 | Saves | Saves sobrevivem a desinstalar/reinstalar; o backup .zip tem uma pasta por jogo |
 | Capas | `${serial}` e `${title}` são montados e codificados; só `https`; imagem reconhecida pelos bytes |
 | SteamGridDB e IGDB | Nome igual tem preferência sobre o primeiro resultado; só imagens dos servidores dos dois sites; a busca da IGDB não deixa o nome escapar da consulta; jogo encontrado fica guardado e jogo não encontrado é tentado de novo depois de uma semana |
+| Histórico | Sessões curtas não entram; a semana começa na segunda no fuso do jogador; totais por jogo, dia, semana, maior sessão e dias seguidos |
 | Instalação | A pasta única no topo do .zip é removida; zip plano fica como está |
 | Outros | Argumentos com aspas, nomes de variáveis, nomes de atalho, datas, comparação de versões |
 

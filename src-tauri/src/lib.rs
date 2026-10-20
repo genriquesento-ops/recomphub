@@ -4,6 +4,7 @@ mod community;
 mod covers;
 mod files;
 mod github;
+mod history;
 mod install;
 mod library;
 mod meta;
@@ -47,6 +48,9 @@ pub struct AppState {
     pub community_path: PathBuf,
     /// SteamGridDB and IGDB lookups (meta/<id>.json and pictures).
     pub meta_dir: PathBuf,
+    /// One record per play session (history.json).
+    pub history: Mutex<history::History>,
+    pub history_path: PathBuf,
 }
 
 /// Everything the interface shows about one game.
@@ -90,6 +94,10 @@ struct GameView {
     hidden: bool,
     launch_args: String,
     env: Vec<library::EnvVar>,
+    /// library::Completion as text ("none", "playing", "beaten"…).
+    completion: library::Completion,
+    play_count: u32,
+    notes: String,
     files: Option<FilesStatus>,
     total_seconds: u64,
     last_played: Option<u64>,
@@ -208,6 +216,9 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         hidden: entry.as_ref().map(|e| e.hidden).unwrap_or(false),
         launch_args: entry.as_ref().map(|e| e.launch_args.clone()).unwrap_or_default(),
         env: entry.as_ref().map(|e| e.env.clone()).unwrap_or_default(),
+        completion: entry.as_ref().map(|e| e.completion).unwrap_or_default(),
+        play_count: entry.as_ref().map(|e| e.play_count).unwrap_or(0),
+        notes: entry.as_ref().map(|e| e.notes.clone()).unwrap_or_default(),
     }
 }
 
@@ -277,6 +288,9 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         hidden: entry.hidden,
         launch_args: entry.launch_args.clone(),
         env: entry.env.clone(),
+        completion: entry.completion,
+        play_count: entry.play_count,
+        notes: entry.notes.clone(),
     }
 }
 
@@ -659,6 +673,94 @@ fn set_favorite(app: AppHandle, id: String, favorite: bool) -> Result<GameView, 
 #[tauri::command]
 fn set_hidden(app: AppHandle, id: String, hidden: bool) -> Result<GameView, String> {
     update_entry(&app, &id, |e| e.hidden = hidden)
+}
+
+#[tauri::command]
+fn set_completion(app: AppHandle, id: String, completion: String) -> Result<GameView, String> {
+    let c = library::Completion::parse(&completion).ok_or("Estado desconhecido.")?;
+    update_entry(&app, &id, |e| e.completion = c)
+}
+
+#[tauri::command]
+fn set_notes(app: AppHandle, id: String, notes: String) -> Result<GameView, String> {
+    if notes.chars().count() > 10_000 {
+        return Err("As anotações passam de 10 mil caracteres.".into());
+    }
+    update_entry(&app, &id, |e| e.notes = notes.trim_end().to_string())
+}
+
+#[derive(Serialize)]
+struct GameHistory {
+    /// Newest first, at most 30.
+    sessions: Vec<history::Record>,
+    /// Sessions in the history (older ones may have been played before RecompHUB 0.12).
+    recorded: u32,
+    average_seconds: u64,
+    longest_seconds: u64,
+}
+
+#[tauri::command]
+fn get_history(app: AppHandle, id: String) -> GameHistory {
+    let state = app.state::<AppState>();
+    let h = state.history.lock().unwrap();
+    let all = h.of(&id, usize::MAX);
+    let total: u64 = all.iter().map(|r| r.seconds).sum();
+    GameHistory {
+        sessions: all.iter().take(30).cloned().collect(),
+        recorded: all.len() as u32,
+        average_seconds: if all.is_empty() { 0 } else { total / all.len() as u64 },
+        longest_seconds: all.iter().map(|r| r.seconds).max().unwrap_or(0),
+    }
+}
+
+#[derive(Serialize)]
+struct StatsView {
+    #[serde(flatten)]
+    stats: history::Stats,
+    /// id -> name, for games no longer in the library too.
+    titles: HashMap<String, String>,
+    /// Counted by library::Completion, for games in the library.
+    completion: HashMap<String, u32>,
+    library_seconds: u64,
+    library_games: u32,
+}
+
+/// "Estatísticas". `offset_minutes` is the page's own time zone (minutes east of UTC), so
+/// days and weeks start at the player's midnight.
+#[tauri::command]
+fn get_stats(app: AppHandle, offset_minutes: i64) -> StatsView {
+    let stats = {
+        let state = app.state::<AppState>();
+        let h = state.history.lock().unwrap();
+        history::stats(&h, library::now(), offset_minutes.clamp(-14 * 60, 14 * 60) * 60, 12)
+    };
+    let library = get_library(app.clone());
+    let mut titles: HashMap<String, String> = library.iter().map(|g| (g.id.clone(), g.title.clone())).collect();
+    {
+        let state = app.state::<AppState>();
+        let lib = state.library.lock().unwrap();
+        for (id, e) in &lib.removed {
+            titles.entry(id.clone()).or_insert_with(|| e.title.clone().unwrap_or_else(|| id.clone()));
+        }
+    }
+    let mut completion: HashMap<String, u32> = HashMap::new();
+    for g in library.iter().filter(|g| g.in_library) {
+        let key = match g.completion {
+            library::Completion::None if g.total_seconds == 0 => library::Completion::NotPlayed,
+            library::Completion::None => library::Completion::Playing,
+            c => c,
+        };
+        let key = serde_json::to_value(key).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+        *completion.entry(key).or_default() += 1;
+    }
+    let in_library: Vec<&GameView> = library.iter().filter(|g| g.in_library).collect();
+    StatsView {
+        stats,
+        titles,
+        completion,
+        library_seconds: in_library.iter().map(|g| g.total_seconds).sum(),
+        library_games: in_library.len() as u32,
+    }
 }
 
 /// "Opções de inicialização": arguments and environment variables for the game's program.
@@ -1101,8 +1203,14 @@ fn reset_playtime(app: AppHandle, id: String) -> Result<GameView, String> {
         let e = lib.games.get_mut(&id).ok_or("Jogo fora da biblioteca.")?;
         e.total_seconds = 0;
         e.last_played = None;
+        e.play_count = 0;
     }
     save(&state)?;
+    {
+        let mut history = state.history.lock().unwrap();
+        history.sessions.retain(|r| r.id != id);
+        history.save(&state.history_path)?;
+    }
     view_any(&state, &id)
 }
 
@@ -1370,6 +1478,8 @@ pub fn run() {
                 backups_root: dir.join("Backups de saves"),
                 community_path: dir.join("community.json"),
                 meta_dir: dir.join("meta"),
+                history: Mutex::new(history::History::load(&dir.join("history.json"))),
+                history_path: dir.join("history.json"),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
@@ -1394,6 +1504,10 @@ pub fn run() {
             set_api_keys,
             game_meta,
             fetch_meta_all,
+            set_completion,
+            set_notes,
+            get_history,
+            get_stats,
             play,
             stop_game,
             open_saves,

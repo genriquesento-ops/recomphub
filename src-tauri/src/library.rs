@@ -61,6 +61,37 @@ pub struct Entry {
     /// Extra environment variables for the game (as Heroic's enviromentOptions).
     #[serde(default)]
     pub env: Vec<EnvVar>,
+    /// Where the player is with the game (as Playnite's completion status).
+    #[serde(default)]
+    pub completion: Completion,
+    /// Sessions of at least history::MIN_SESSION_SECS.
+    #[serde(default)]
+    pub play_count: u32,
+    /// The player's own notes about the game.
+    #[serde(default)]
+    pub notes: String,
+}
+
+/// As Playnite's completion statuses. `None`: not chosen; the page shows "Não jogado" or
+/// "Jogando" from the play time, and the first session sets `Playing`.
+#[derive(Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Completion {
+    #[default]
+    None,
+    NotPlayed,
+    Planned,
+    Playing,
+    OnHold,
+    Beaten,
+    Completed,
+    Abandoned,
+}
+
+impl Completion {
+    pub fn parse(s: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

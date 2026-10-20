@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::library::now;
+use crate::history::{Record, MIN_SESSION_SECS};
+use crate::library::{now, Completion};
 use crate::AppState;
 
 const POLL: Duration = Duration::from_secs(3);
@@ -26,6 +27,8 @@ pub struct Session {
     last_tick: Instant,
     /// Play time not yet written to the library.
     unsaved: Duration,
+    /// All play time of this session, for the history.
+    counted: Duration,
 }
 
 #[derive(Default)]
@@ -137,6 +140,7 @@ fn tick(app: &AppHandle, sys: &System) {
     let at = Instant::now();
     let mut started = Vec::new();
     let mut ended = Vec::new();
+    let mut records = Vec::new();
     let credits = {
         let mut guard = state.sessions.lock().unwrap();
         let s = &mut *guard;
@@ -145,13 +149,14 @@ fn tick(app: &AppHandle, sys: &System) {
             match (s.running.get_mut(id), running) {
                 (None, true) => {
                     s.launching.remove(id);
-                    s.running.insert(id.clone(), Session { started: now(), last_tick: at, unsaved: Duration::ZERO });
+                    s.running.insert(id.clone(), Session { started: now(), last_tick: at, unsaved: Duration::ZERO, counted: Duration::ZERO });
                     started.push(id.clone());
                 }
                 (Some(sess), _) => {
                     let gap = at - sess.last_tick;
                     if gap <= MAX_TICK {
                         sess.unsaved += gap;
+                        sess.counted += gap;
                     }
                     sess.last_tick = at;
                     if !running {
@@ -169,6 +174,7 @@ fn tick(app: &AppHandle, sys: &System) {
                 if secs > 0 {
                     credits.push((id.clone(), secs));
                 }
+                records.push(record(id, &sess));
             }
         }
         credits
@@ -176,6 +182,7 @@ fn tick(app: &AppHandle, sys: &System) {
 
     let ended_ids: Vec<String> = ended.iter().map(|(id, _)| id.clone()).collect();
     credit(app, &credits, &ended_ids);
+    remember(app, &started, records);
     if !started.is_empty() || !ended.is_empty() {
         crate::tray::refresh(app);
     }
@@ -187,10 +194,56 @@ fn tick(app: &AppHandle, sys: &System) {
     }
 }
 
-/// Writes the play time still in memory (RecompHUB is closing).
+/// Writes the play time still in memory (RecompHUB is closing). Sessions still running go
+/// into the history as they are; if the game keeps running, the next start begins a new one.
 pub fn flush(app: &AppHandle) {
-    let credits = app.state::<AppState>().sessions.lock().unwrap().take_unsaved(Duration::ZERO);
+    let (credits, records) = {
+        let state = app.state::<AppState>();
+        let mut s = state.sessions.lock().unwrap();
+        let credits = s.take_unsaved(Duration::ZERO);
+        let records: Vec<Record> = s.running.iter().map(|(id, sess)| record(id, sess)).collect();
+        s.running.clear();
+        (credits, records)
+    };
     credit(app, &credits, &[]);
+    remember(app, &[], records);
+}
+
+fn record(id: &str, sess: &Session) -> Record {
+    Record { id: id.to_string(), start: sess.started, end: now(), seconds: sess.counted.as_secs() }
+}
+
+/// History of finished sessions, the play count, and "Jogando" for a game played for the
+/// first time (as Playnite does).
+fn remember(app: &AppHandle, started: &[String], records: Vec<Record>) {
+    if started.is_empty() && records.is_empty() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    {
+        let mut lib = state.library.lock().unwrap();
+        for id in started {
+            if let Some(e) = lib.games.get_mut(id) {
+                if matches!(e.completion, Completion::None | Completion::NotPlayed) {
+                    e.completion = Completion::Playing;
+                }
+            }
+        }
+        for r in records.iter().filter(|r| r.seconds >= MIN_SESSION_SECS) {
+            if let Some(e) = lib.games.get_mut(&r.id) {
+                e.play_count += 1;
+            }
+        }
+        let _ = lib.save(&state.library_path);
+    }
+    if records.is_empty() {
+        return;
+    }
+    let mut history = state.history.lock().unwrap();
+    for r in records {
+        history.record(r);
+    }
+    let _ = history.save(&state.history_path);
 }
 
 /// Splits "--fullscreen --rom \"C:\\My Games\\x.z64\"" into arguments: spaces separate,

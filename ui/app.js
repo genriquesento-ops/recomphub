@@ -429,6 +429,161 @@ function aboutBox(g) {
     </div>`;
 }
 
+// ---- "Seu progresso" (estado, histórico, anotações) and the Estatísticas page ----
+
+const COMPLETION = [
+  ['not_played', 'Não jogado'],
+  ['planned', 'Na fila'],
+  ['playing', 'Jogando'],
+  ['on_hold', 'Pausado'],
+  ['beaten', 'Zerado'],
+  ['completed', 'Completo (100%)'],
+  ['abandoned', 'Abandonado'],
+];
+const completionOf = (g) => (g.completion !== 'none' ? g.completion : g.total_seconds > 0 ? 'playing' : 'not_played');
+const completionLabel = (key) => (COMPLETION.find((c) => c[0] === key) || [key, key])[1];
+const historyCache = {};   // id -> 'loading' | { sessions, recorded, average_seconds, longest_seconds }
+
+function shortTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h) return `${h} h ${String(m).padStart(2, '0')} min`;
+  return m ? `${m} min` : `${seconds} s`;
+}
+
+function sessionDate(unix) {
+  return new Date(unix * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function progressBoxHtml(g) {
+  const h = historyCache[g.id];
+  let history = '<p class="muted">Carregando o histórico…</p>';
+  if (h && h !== 'loading') {
+    history = h.sessions.length ? `
+      <div class="stats">
+        <div><div class="k">Vezes jogado</div><div class="v">${g.play_count}</div></div>
+        <div><div class="k">Sessão média</div><div class="v">${shortTime(h.average_seconds)}</div></div>
+        <div><div class="k">Maior sessão</div><div class="v">${shortTime(h.longest_seconds)}</div></div>
+      </div>
+      <details>
+        <summary class="muted">Últimas sessões (${Math.min(h.sessions.length, 30)} de ${h.recorded})</summary>
+        <ul class="sessions">${h.sessions.map((r) =>
+          `<li><span>${sessionDate(r.start)}</span><b>${shortTime(r.seconds)}</b></li>`).join('')}</ul>
+      </details>` : '<p class="muted">Nenhuma sessão registrada ainda. O histórico começa a contar a partir desta versão.</p>';
+  }
+  const current = completionOf(g);
+  return `
+    <div class="box progress-box">
+      <h3>Seu progresso</h3>
+      <div class="tags-edit">
+        <label for="completion">Estado:</label>
+        <select id="completion" data-change="completion">
+          ${COMPLETION.map(([k, label]) => `<option value="${k}" ${k === current ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </div>
+      ${history}
+      <p><b>Anotações</b></p>
+      <textarea id="notes" spellcheck="true" placeholder="Onde parou, códigos, o que falta fazer…">${esc(g.notes)}</textarea>
+      <div class="row"><button data-act="notes-save">Salvar anotações</button></div>
+    </div>`;
+}
+
+function decorateProgress(g) {
+  if (!g.in_library) return;
+  if (historyCache[g.id] === undefined) {
+    historyCache[g.id] = 'loading';
+    setTimeout(async () => {
+      try {
+        historyCache[g.id] = await invoke('get_history', { id: g.id });
+      } catch {
+        delete historyCache[g.id];
+        return;
+      }
+      if (openId === g.id) render();
+    }, 0);
+  }
+  const right = document.querySelector('#detail .detail > div:nth-child(2)');
+  if (!right) return;
+  right.insertAdjacentHTML('beforeend', progressBoxHtml(g));
+  const select = document.getElementById('completion');
+  if (select) {
+    select.addEventListener('change', async () => {
+      const updated = await call('set_completion', { id: g.id, completion: select.value });
+      if (updated) setGame(updated);
+    });
+  }
+}
+
+let statsData = null;
+
+async function openStats() {
+  openId = '__stats';
+  statsData = null;
+  render();
+  // getTimezoneOffset is minutes WEST of UTC; the backend wants east.
+  statsData = await call('get_stats', { offsetMinutes: -new Date().getTimezoneOffset() });
+  if (openId === '__stats') render();
+}
+
+function bars(buckets, label) {
+  const max = Math.max(1, ...buckets.map((b) => b.seconds));
+  return `<div class="bars">${buckets.map((b) => `
+    <div class="bar" title="${esc(dayDate(b.day).toLocaleDateString('pt-BR', { timeZone: 'UTC' }))}: ${shortTime(b.seconds)}">
+      <div class="fill" style="height:${Math.round((b.seconds / max) * 100)}%"></div>
+      <span>${esc(label(b))}</span>
+    </div>`).join('')}</div>`;
+}
+
+// Day number (days since 1970-01-01 in the player's time zone) as a date.
+const dayDate = (day) => new Date(day * 86400000);
+const dayLabel = (b) => dayDate(b.day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
+const weekdayLabel = (b) => dayDate(b.day).toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', '');
+
+function renderStats() {
+  const s = statsData;
+  let body = '<p class="muted">Calculando…</p>';
+  if (s) {
+    const title = (id) => s.titles[id] || id;
+    const thisWeek = s.weeks.length ? s.weeks[s.weeks.length - 1].seconds : 0;
+    const topMax = Math.max(1, ...s.games.map((g) => g.seconds));
+    body = `
+      <div class="stats big">
+        <div><div class="k">Tempo total na biblioteca</div><div class="v">${playTime(s.library_seconds)}</div></div>
+        <div><div class="k">Esta semana</div><div class="v">${shortTime(thisWeek)}</div></div>
+        <div><div class="k">Sessões registradas</div><div class="v">${s.sessions}</div></div>
+        <div><div class="k">Dias seguidos jogando</div><div class="v">${s.streak_days}</div></div>
+      </div>
+      <div class="box"><h3>Últimos 14 dias</h3>${bars(s.days, weekdayLabel)}</div>
+      <div class="box"><h3>Últimas 12 semanas</h3>${bars(s.weeks, dayLabel)}
+        <p class="muted">Cada barra é uma semana, de segunda a domingo, marcada pela segunda-feira.</p></div>
+      <div class="box">
+        <h3>Mais jogados</h3>
+        ${s.games.length ? `<ul class="top">${s.games.slice(0, 10).map((g) => `
+          <li>
+            <span class="name">${esc(title(g.id))}</span>
+            <span class="track"><span style="width:${Math.round((g.seconds / topMax) * 100)}%"></span></span>
+            <span class="muted">${shortTime(g.seconds)} · ${g.sessions} sessão(ões)</span>
+          </li>`).join('')}</ul>` : '<p class="muted">Ainda não há sessões registradas. Jogue algo pelo RecompHUB!</p>'}
+        ${s.longest ? `<p class="muted">Maior sessão: ${shortTime(s.longest.seconds)} de ${esc(title(s.longest.id))}, em ${sessionDate(s.longest.start)}.</p>` : ''}
+      </div>
+      <div class="box">
+        <h3>Estado dos ${s.library_games} jogo(s) da biblioteca</h3>
+        <div class="tags-edit">${COMPLETION.filter(([k]) => s.completion[k]).map(([k, label]) =>
+          `<span class="tag">${label}: ${s.completion[k]}</span>`).join('') || '<span class="muted">Biblioteca vazia.</span>'}</div>
+      </div>
+      <p class="muted">As estatísticas por dia e semana vêm do histórico de sessões, que começou na versão 0.12.
+        O tempo total inclui o que foi jogado antes.</p>`;
+  }
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="back">← Biblioteca</button>
+    <div class="covers-page">
+      <h2>Estatísticas</h2>
+      ${body}
+    </div>`;
+  document.querySelectorAll('#detail [data-act]').forEach((el) =>
+    el.addEventListener('click', () => act(el.dataset.act, null, el)));
+}
+
 // Banner above the page and "Sobre o jogo" under the play time, for games in the library.
 function decorateMeta(g) {
   if (!g.in_library) return;
@@ -592,6 +747,7 @@ function renderSettings() {
 function renderDetail() {
   if (openId === '__covers') return renderCovers();
   if (openId === '__settings') return renderSettings();
+  if (openId === '__stats') return renderStats();
   if (openId && openId.startsWith('c:')) return renderCommunityItem(openId.slice(2));
   const g = games.find((x) => x.id === openId);
   if (!g) {
@@ -603,6 +759,7 @@ function renderDetail() {
   else if (g.kind === 'community') renderCommunityDetail(g);
   else renderPortDetail(g);
   decorateMeta(g);
+  decorateProgress(g);
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
     el.addEventListener('click', () => act(el.dataset.act, g, el)));
 }
@@ -888,6 +1045,14 @@ async function act(action, g, el) {
       toast('Opções de inicialização salvas.');
       break;
     }
+    case 'notes-save': {
+      const updated = await call('set_notes', { id: g.id, notes: $('#notes').value });
+      if (updated) {
+        setGame(updated);
+        toast('Anotações salvas.');
+      }
+      break;
+    }
     case 'open-settings':
       $('#btn-settings').click();
       break;
@@ -1037,6 +1202,7 @@ listen('install-progress', (e) => {
 
 listen('session', async (e) => {
   const { id, state, seconds } = e.payload;
+  if (state === 'ended') delete historyCache[id];
   try {
     setGame(await invoke('get_game', { id }));
   } catch {
@@ -1438,6 +1604,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('#btn-tv').addEventListener('click', tvOpen);
+$('#btn-stats').addEventListener('click', openStats);
 $('#btn-settings').addEventListener('click', async () => {
   settings = await call('get_settings');
   keyResults = null;

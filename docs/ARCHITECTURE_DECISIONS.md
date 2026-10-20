@@ -84,6 +84,17 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     `catalog.json` como dado conferido e roda com progresso visível, nunca escondido. Programas
     de ports da Comunidade nunca são rodados pelo RecompHUB além do botão Jogar.
 
+## Histórico e estado
+
+23. **Uma linha por sessão em `history.json`, separado da biblioteca.** Cada sessão guarda início,
+    fim e o tempo que contou (sem o tempo com o PC dormindo). Sessões com menos de 10 segundos
+    não entram; o arquivo guarda no máximo 20 mil sessões. Ao fechar o RecompHUB com um jogo
+    aberto, a sessão é registrada até ali.
+24. **Estado do jogo como no Playnite.** Não jogado, Na fila, Jogando, Pausado, Zerado, Completo
+    e Abandonado. Enquanto o jogador não escolhe, o estado vem do tempo de jogo; a primeira sessão
+    marca "Jogando". Dias e semanas das estatísticas começam à meia-noite do fuso do PC; a
+    semana começa na segunda.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa
