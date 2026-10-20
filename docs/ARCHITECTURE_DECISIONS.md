@@ -70,6 +70,20 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
 17. **Programa escolhido pelo jogador.** Depois de instalar, os `.exe` da pasta são listados; com
     um só, ele vira o botão Jogar; com vários, o jogador escolhe ("Escolher programa").
 
+## Arquivos do jogador
+
+18. **Arrastar e soltar e procurar nos Downloads usam a mesma conferência.** O arquivo solto na
+    janela ou achado na pasta Downloads passa pelo mesmo caminho do botão "Escolher a ROM"
+    (XXH3-64 tirado do código-fonte do port). Não usamos MD5: seria um segundo valor, sem
+    garantia de bater com o que o port aceita.
+19. **Procurar nos Downloads só quando o jogador clica.** Só arquivos .z64/.n64/.v64 de até
+    64 MB, na pasta e nas pastas logo abaixo dela, no máximo 100 arquivos; só o que bater
+    exatamente é mostrado, e o jogador confirma antes de ser entregue ao port. Nada sai do PC.
+20. **Sem extrator ou patcher em segundo plano.** Os ports do catálogo leem os arquivos do
+    jogador quando abrem; não há passo de extração. Se um port precisar disso, o passo entra no
+    `catalog.json` como dado conferido e roda com progresso visível, nunca escondido. Programas
+    de ports da Comunidade nunca são rodados pelo RecompHUB além do botão Jogar.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

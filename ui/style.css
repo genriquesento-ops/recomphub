@@ -216,3 +216,12 @@ label.check input { margin-top: 3px; }
   .detail { grid-template-columns: 1fr; }
   .detail .cover { max-width: 280px; }
 }
+
+.dropzone {
+  margin: 12px 0; padding: 18px; text-align: center; color: var(--muted);
+  border: 2px dashed var(--line); border-radius: 10px; transition: border-color .15s, background .15s;
+}
+.dropzone.over { border-color: var(--accent); background: rgba(224, 163, 46, .08); color: var(--text); }
+.dropzone.busy { border-style: solid; color: var(--text); }
+.found { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--ok); border-radius: 8px; }
+.found p { margin: 0 0 8px; word-break: break-all; }

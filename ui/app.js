@@ -159,10 +159,40 @@ function renderGrid() {
   document.querySelectorAll('.card').forEach((el) => el.addEventListener('click', () => openGame(el.dataset.id)));
 }
 
+const downloadsFound = {};   // id -> 'searching' | 'none' | path found in Downloads
+
+function dropZone(g) {
+  const what = g.files_kind === 'folder' ? 'a pasta do dump' : 'o arquivo da ROM';
+  if (checkingDrop === g.id) return '<div class="dropzone busy">Conferindo o arquivo…</div>';
+  return `<div class="dropzone" id="dropzone">Arraste ${what} e solte aqui</div>`;
+}
+
+function downloadsBox(g) {
+  if (g.files_kind !== 'file') return '';
+  const found = downloadsFound[g.id];
+  if (found === 'searching') return '<p class="muted">Procurando na pasta Downloads…</p>';
+  if (found === 'none') {
+    return '<p class="muted">Nenhuma ROM que sirva para este port na pasta Downloads (nem nas pastas logo abaixo dela).</p>';
+  }
+  if (found) {
+    return `
+      <div class="found">
+        <p>Encontrei a ROM certa: <b>${esc(found)}</b></p>
+        <div class="row">
+          <button class="primary" data-act="use-found">Usar este arquivo</button>
+          <button class="ghost" data-act="dismiss-found">Não usar</button>
+        </div>
+      </div>`;
+  }
+  return '';
+}
+
 function filesBox(g) {
   const picked = filesResult[g.id];
   const files = picked && !picked.ok ? picked : g.files;
   const label = g.files_kind === 'folder' ? 'Escolher a pasta do dump' : 'Escolher a ROM';
+  const searchBtn = g.files_kind === 'file' && !downloadsFound[g.id]
+    ? '<button class="ghost" data-act="find-downloads">Procurar na pasta Downloads</button>' : '';
   if (files && files.ok) {
     return `
       <div class="box ok">
@@ -179,9 +209,33 @@ function filesBox(g) {
       ${details.length ? `<ul>${details.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}
       <p><b>O que você precisa:</b> ${esc(g.needs)}</p>
       <p class="muted">${esc(g.files_help)} O RecompHUB nunca baixa arquivos de jogos: eles vêm da sua cópia.</p>
-      <div class="row"><button class="primary" data-act="files">${label}</button></div>
+      ${dropZone(g)}
+      <div class="row"><button class="primary" data-act="files">${label}</button>${searchBtn}</div>
+      ${downloadsBox(g)}
     </div>
     ${guideBox(g)}`;
+}
+
+// The page whose files box takes a dropped file: an installed catalog port that is open.
+function dropTarget() {
+  const g = games.find((x) => x.id === openId);
+  if (!g || g.kind !== 'port' || !g.files_kind) return null;
+  if (['not_installed', 'installing'].includes(g.status)) return null;
+  return g;
+}
+
+let checkingDrop = null;
+
+async function provideFiles(g, path) {
+  const result = await call('provide_files', { id: g.id, path: path || null });
+  if (!result) return;
+  filesResult[g.id] = result;
+  if (result.ok) {
+    delete filesResult[g.id];
+    delete downloadsFound[g.id];
+    toast('Arquivos conferidos. O jogo está pronto.');
+  }
+  setGame(await call('get_game', { id: g.id }));
 }
 
 function guideBox(g) {
@@ -628,17 +682,32 @@ async function act(action, g, el) {
       }
       break;
     }
-    case 'files': {
-      const result = await call('provide_files', { id: g.id });
-      if (!result) break;
-      filesResult[g.id] = result;
-      if (result.ok) {
-        delete filesResult[g.id];
-        toast('Arquivos conferidos. O jogo está pronto.');
+    case 'files':
+      await provideFiles(g, null);
+      break;
+    case 'find-downloads': {
+      downloadsFound[g.id] = 'searching';
+      render();
+      let found = null;
+      try {
+        found = await invoke('find_rom_in_downloads', { id: g.id });
+      } catch (e) {
+        toast(String(e), true);
       }
-      setGame(await call('get_game', { id: g.id }));
+      downloadsFound[g.id] = found || 'none';
+      render();
       break;
     }
+    case 'use-found': {
+      const path = downloadsFound[g.id];
+      delete downloadsFound[g.id];
+      await provideFiles(g, path);
+      break;
+    }
+    case 'dismiss-found':
+      delete downloadsFound[g.id];
+      render();
+      break;
     case 'play':
       await call('play', { id: g.id });
       setGame(await call('get_game', { id: g.id }));
@@ -792,6 +861,33 @@ listen('session', async (e) => {
 });
 
 listen('open-game', (e) => openGame(e.payload));
+
+// Dropping the ROM (or the dump folder) on the window; the zone lights up while dragging.
+const dropHighlight = (on) => {
+  const zone = document.getElementById('dropzone');
+  if (zone) zone.classList.toggle('over', on);
+};
+listen('tauri://drag-enter', () => dropHighlight(!!dropTarget()));
+listen('tauri://drag-leave', () => dropHighlight(false));
+listen('tauri://drag-drop', async (e) => {
+  dropHighlight(false);
+  const g = dropTarget();
+  const paths = (e.payload && e.payload.paths) || [];
+  if (!g) {
+    if (paths.length) toast('Abra a página do jogo e solte o arquivo na caixa "Arquivos do jogo".', true);
+    return;
+  }
+  if (!paths.length || checkingDrop) return;
+  if (paths.length > 1) toast('Solte um arquivo de cada vez. Conferindo só o primeiro.');
+  checkingDrop = g.id;
+  render();
+  try {
+    await provideFiles(g, paths[0]);
+  } finally {
+    checkingDrop = null;
+    render();
+  }
+});
 listen('notify', (e) => toast(String(e.payload), true));
 
 // ---- Aba Comunidade: ports from the awesome list and GitHub topics, not verified ----

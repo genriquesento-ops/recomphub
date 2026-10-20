@@ -11,6 +11,7 @@
 - [x] **v0.7** Fase 3: opções de inicialização, favoritos e ocultos, bandeja, Modo TV, aviso de versão do RecompHUB
 - [x] **v0.8** Fase 4: decisões de arquitetura, este arquivo, mais testes automáticos
 - [x] **v0.9** Aba Comunidade: ports da lista awesome-unofficial-pc-ports e dos tópicos do GitHub, instalação experimental com aviso, escolha do programa, atualização e desinstalação
+- [x] **v0.10** Arrastar e soltar a ROM ou a pasta do dump na página do jogo, botão "Procurar na pasta Downloads"
 - [ ] Repositório público, para o catálogo remoto e o aviso de versão do RecompHUB funcionarem
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 - [ ] Conquistas (v2 do SPEC)
@@ -22,7 +23,7 @@ Rodam no GitHub Actions antes de gerar o instalador (`cargo test --lib`):
 | Área | O que garantem |
 | --- | --- |
 | Catálogo | O `catalog.json` embutido é válido; caminhos não saem da pasta do port; modelos de caminho só usam pastas conhecidas |
-| ROM de N64 | `.v64` e `.n64` viram `.z64`; ROM de outra região é identificada na mensagem |
+| ROM de N64 | `.v64` e `.n64` viram `.z64`; ROM de outra região é identificada na mensagem; a busca numa pasta só acha a ROM exata, até um nível abaixo |
 | Dump de PS4 | `param.sfo` é lido (`TITLE_ID`, `APP_VER`) e arquivo estranho é recusado |
 | Saves | Saves sobrevivem a desinstalar/reinstalar; o backup .zip tem uma pasta por jogo |
 | Capas | `${serial}` e `${title}` são montados e codificados; só `https`; imagem reconhecida pelos bytes |

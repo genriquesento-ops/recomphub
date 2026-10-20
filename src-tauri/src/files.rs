@@ -40,6 +40,15 @@ pub fn status(game: &GameDef, install_dir: &Path) -> FilesStatus {
     }
 }
 
+/// Looks in `root` and the folders right below it for the ROM this port accepts. Only
+/// N64 ROM files up to 64 MB are read, and only an exact match is returned. Nothing is copied.
+pub fn find_rom(game: &GameDef, root: &Path) -> Option<PathBuf> {
+    match &game.files {
+        Verifier::N64Rom { .. } => n64::find(&game.files, root),
+        _ => None,
+    }
+}
+
 /// The player picked `path`: check it and, when it is right, hand it to the port.
 pub fn provide(game: &GameDef, install_dir: &Path, path: &Path) -> FilesStatus {
     match &game.files {
@@ -337,6 +346,48 @@ mod n64 {
     use xxhash_rust::xxh3::xxh3_64;
 
     const Z64_START: [u8; 4] = [0x80, 0x37, 0x12, 0x40];
+    const MAX_ROM: u64 = 64 * 1024 * 1024;
+    /// Stops a search in a folder full of ROMs from reading for minutes.
+    const MAX_CHECKED: usize = 100;
+
+    fn rom_name(path: &Path) -> bool {
+        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        ["z64", "n64", "v64"].contains(&ext.as_str())
+    }
+
+    fn matches(v: &Verifier, path: &Path) -> bool {
+        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if size == 0 || size > MAX_ROM {
+            return false;
+        }
+        let Some(rom) = std::fs::read(path).ok().and_then(to_z64) else { return false };
+        Some(xxh3_64(&rom)) == expected(v)
+    }
+
+    /// `root` and one level of folders below it; links to folders are not followed.
+    pub fn find(v: &Verifier, root: &Path) -> Option<PathBuf> {
+        let mut dirs = vec![(root.to_path_buf(), 0)];
+        let mut checked = 0;
+        while let Some((dir, depth)) = dirs.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for e in entries.flatten() {
+                let Ok(kind) = e.file_type() else { continue };
+                let path = e.path();
+                if kind.is_dir() && depth == 0 {
+                    dirs.push((path, 1));
+                } else if kind.is_file() && rom_name(&path) {
+                    checked += 1;
+                    if checked > MAX_CHECKED {
+                        return None;
+                    }
+                    if matches(v, &path) {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+        None
+    }
 
     /// Where an N64: Recompiled port keeps its data: next to it with portable.txt, else
     /// %LOCALAPPDATA%\<program_id> (RecompFrontend's get_app_folder_path).
@@ -412,7 +463,7 @@ mod n64 {
             ]);
         }
         let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        if size == 0 || size > 64 * 1024 * 1024 {
+        if size == 0 || size > MAX_ROM {
             return bad(vec!["O arquivo não tem o tamanho de uma ROM de N64.".to_string()]);
         }
         let data = match std::fs::read(path) {
@@ -498,6 +549,28 @@ mod n64 {
             fake[0x3E] = b'P';
             let lines = explain_wrong_rom(banjo, &fake);
             assert!(lines[0].contains("europeia"), "{lines:?}");
+        }
+
+        #[test]
+        fn finds_only_the_exact_rom_in_a_folder() {
+            let (_, games, _) = catalog::parse(catalog::BUILTIN).unwrap();
+            let mut game = games.iter().find(|g| g.id == "banjo").unwrap().clone();
+            let right = rom(&[0, 1, 2, 3]);
+            let Verifier::N64Rom { xxh3, .. } = &mut game.files else { panic!() };
+            *xxh3 = format!("0x{:016X}", xxh3_64(&right));
+
+            let root = std::env::temp_dir().join(format!("recomphub-find-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(root.join("jogos").join("fundo")).unwrap();
+            std::fs::write(root.join("outro.z64"), rom(&[0, 1, 2, 3]).iter().map(|b| b ^ 1).collect::<Vec<_>>()).unwrap();
+            std::fs::write(root.join("jogos").join("fundo").join("longe.z64"), &right).unwrap();
+            std::fs::write(root.join("certo.txt"), &right).unwrap();
+            assert_eq!(super::super::find_rom(&game, &root), None, "too deep, wrong name or wrong ROM");
+
+            let v64 = root.join("jogos").join("banjo.v64");
+            std::fs::write(&v64, rom(&[1, 0, 3, 2])).unwrap();
+            assert_eq!(super::super::find_rom(&game, &root), Some(v64));
+            let _ = std::fs::remove_dir_all(&root);
         }
     }
 }

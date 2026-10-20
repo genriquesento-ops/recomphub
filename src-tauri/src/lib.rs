@@ -1007,10 +1007,11 @@ fn open_backups(app: AppHandle) -> Result<(), String> {
     app.opener().open_path(folder.display().to_string(), None::<&str>).map_err(|e| e.to_string())
 }
 
-/// The player picks their game files; they are checked and handed to the port.
+/// The player picks their game files (or dropped them on the window, or accepted the one
+/// found in Downloads: `path`); they are checked and handed to the port.
 /// Ok(None) when the player closed the dialog.
 #[tauri::command]
-async fn provide_files(app: AppHandle, id: String) -> Result<Option<FilesStatus>, String> {
+async fn provide_files(app: AppHandle, id: String, path: Option<String>) -> Result<Option<FilesStatus>, String> {
     let game = game_or_err(&id)?;
     let dir = app
         .state::<AppState>()
@@ -1019,7 +1020,9 @@ async fn provide_files(app: AppHandle, id: String) -> Result<Option<FilesStatus>
         .unwrap()
         .install_dir(game.id.as_str())
         .ok_or("Instale o jogo primeiro.")?;
-    let picked = if game.files_kind() == "folder" {
+    let picked = if let Some(p) = path.filter(|p| !p.trim().is_empty()) {
+        Some(PathBuf::from(p))
+    } else if game.files_kind() == "folder" {
         pick_folder(&app, "Escolha a pasta com o dump do jogo")
     } else {
         pick_file(&app, "Escolha o arquivo da ROM")
@@ -1029,6 +1032,18 @@ async fn provide_files(app: AppHandle, id: String) -> Result<Option<FilesStatus>
         .await
         .map_err(|e| e.to_string())?;
     Ok(Some(status))
+}
+
+/// "Procurar na pasta Downloads": only when the player clicks, only ROM files, and only an
+/// exact match comes back. The player still confirms before it is handed to the port.
+#[tauri::command]
+async fn find_rom_in_downloads(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    let game = game_or_err(&id)?;
+    let downloads = app.path().download_dir().map_err(|_| "Não encontrei a pasta Downloads.".to_string())?;
+    let found = tauri::async_runtime::spawn_blocking(move || files::find_rom(game, &downloads))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(found.map(|p| p.display().to_string()))
 }
 
 #[tauri::command]
@@ -1200,6 +1215,7 @@ pub fn run() {
             add_existing,
             install_game,
             provide_files,
+            find_rom_in_downloads,
             play,
             stop_game,
             open_saves,
