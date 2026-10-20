@@ -1720,7 +1720,9 @@ async fn install_mod(app: AppHandle, id: String, package: String) -> Result<Mods
         let state = app.state::<AppState>();
         game_closed(&state, &id)?;
         let (_, def, data) = mods_target(&state, &id)?;
-        (def.game_id.clone(), data, state.mods_dir.join("lista"), state.mods_dir.clone(), save_sources(&state, &id), state.settings.lock().unwrap().backup_keep as usize)
+        let keep = state.settings.lock().unwrap().backup_keep as usize;
+        let sources = save_sources(&state, &id);
+        (def.game_id.clone(), data, state.mods_dir.join("lista"), state.mods_dir.clone(), sources, keep)
     };
     let community = game_or_err(&id)?.mods.as_ref().map(|m| m.thunderstore.clone()).unwrap_or_default();
     let list = mods::list(&list_dir, &community, false, library::now()).await?;
