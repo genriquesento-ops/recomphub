@@ -13,6 +13,7 @@ mod ludusavi;
 mod meta;
 mod play;
 mod profiles;
+mod ra;
 mod saves;
 mod shortcut;
 mod tray;
@@ -63,6 +64,8 @@ pub struct AppState {
     pub profiles_dir: PathBuf,
     /// Unlocked achievements, one file per profile.
     pub achievements_dir: PathBuf,
+    /// RetroAchievements cache: game list, progress per profile, badges.
+    pub ra_dir: PathBuf,
     /// Notices waiting for the window over the game.
     pub overlay_queue: Mutex<VecDeque<Notice>>,
 }
@@ -539,6 +542,8 @@ fn open_link(app: AppHandle, url: String) -> Result<(), String> {
         || url == meta::SGDB_KEY_PAGE
         || url == meta::IGDB_KEY_PAGE
         || url == ludusavi::PROJECT_PAGE
+        || url == ra::KEY_PAGE
+        || known_ra_page(&state, &url)
         || known_igdb_page(&state, &url)
         || url
             .strip_prefix("https://github.com/")
@@ -1818,12 +1823,174 @@ fn test_achievement_notice(app: AppHandle) {
     });
 }
 
+// ---- RetroAchievements (só leitura) ----
+
+/// The active profile's RetroAchievements account. An empty field keeps what is saved;
+/// `clear` forgets both. Returns the result of a test request.
+#[tauri::command]
+async fn set_ra_account(app: AppHandle, user: String, key: String, clear: bool) -> Result<String, String> {
+    let user = user.trim().to_string();
+    let key = key.trim().to_string();
+    if user.len() > 40 || !user.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') {
+        return Err("Nome de usuário inválido.".into());
+    }
+    if key.len() > 64 || key.chars().any(|c| !c.is_ascii_alphanumeric()) {
+        return Err("A chave de API tem caracteres estranhos. Copie de novo do site.".into());
+    }
+    let (user, key) = {
+        let state = app.state::<AppState>();
+        let mut p = state.profiles.lock().unwrap();
+        let active = p.active.clone();
+        let profile = p.list.iter_mut().find(|x| x.id == active).ok_or("Perfil não encontrado.")?;
+        if clear {
+            profile.ra_user.clear();
+            profile.ra_key.clear();
+        }
+        if !user.is_empty() {
+            profile.ra_user = user;
+        }
+        if !key.is_empty() {
+            profile.ra_key = key;
+        }
+        let pair = (profile.ra_user.clone(), profile.ra_key.clone());
+        p.save(&state.profiles_path)?;
+        let _ = std::fs::remove_dir_all(state.ra_dir.join("perfis").join(&active));
+        pair
+    };
+    if clear || user.is_empty() || key.is_empty() {
+        return Ok("Conta do RetroAchievements desconectada deste perfil.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || ra::test(&user, &key)).await.map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct RaBadge {
+    #[serde(flatten)]
+    a: ra::Achievement,
+    picture: Option<String>,
+}
+
+#[derive(Serialize, Default)]
+struct RaView {
+    /// The active profile has a username and key.
+    linked: bool,
+    user: String,
+    /// What to tell the player when there is nothing to show.
+    message: Option<String>,
+    game_id: u64,
+    title: String,
+    console: String,
+    total: u32,
+    earned: u32,
+    earned_hardcore: u32,
+    completion: String,
+    fetched_at: u64,
+    page: Option<String>,
+    achievements: Vec<RaBadge>,
+}
+
+#[tauri::command]
+async fn get_ra(app: AppHandle, id: String, force: bool) -> Result<RaView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let (profile, user, key) = {
+            let p = state.profiles.lock().unwrap();
+            let a = p.active();
+            (a.id.clone(), a.ra_user.clone(), a.ra_key.clone())
+        };
+        let mut view = RaView { linked: !user.is_empty() && !key.is_empty(), user: user.clone(), ..Default::default() };
+        if !view.linked {
+            return Ok(view);
+        }
+        let rom = {
+            let lib = state.library.lock().unwrap();
+            let dir = lib.games.get(&id).map(|e| PathBuf::from(&e.install_dir));
+            catalog::get(&id).zip(dir).and_then(|(g, d)| files::n64_rom_file(g, &d))
+        };
+        let Some(rom) = rom.filter(|r| r.is_file()) else {
+            view.message = Some("O RetroAchievements identifica o jogo pela ROM. Forneça a ROM na caixa \"Arquivos do jogo\" primeiro.".into());
+            return Ok(view);
+        };
+        let cache_dir = state.ra_dir.join("perfis").join(&profile);
+        let cache = cache_dir.join(format!("{id}.json"));
+        let now = library::now();
+        let cached: Option<ra::Progress> = std::fs::read(&cache).ok().and_then(|b| serde_json::from_slice(&b).ok());
+        let progress = match cached {
+            Some(c) if !force && now < c.fetched_at + ra::PROGRESS_MAX_AGE => c,
+            _ => {
+                let md5 = ra::rom_md5(&rom).ok_or("Não consegui ler a ROM.")?;
+                let list = ra::game_list(&state.ra_dir, ra::N64, &key)?;
+                let Some((game_id, _)) = ra::find_by_hash(&list, &md5) else {
+                    view.message = Some("Esta ROM não está na lista do RetroAchievements (ele aceita só versões conferidas).".into());
+                    return Ok(view);
+                };
+                let p = ra::progress(&user, &key, game_id, now)?;
+                std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+                let _ = std::fs::write(&cache, serde_json::to_vec(&p).unwrap_or_default());
+                p
+            }
+        };
+        let badges = state.ra_dir.join("badges");
+        view.page = Some(format!("https://retroachievements.org/game/{}", progress.game_id));
+        view.game_id = progress.game_id;
+        view.title = progress.title;
+        view.console = progress.console;
+        view.total = progress.total;
+        view.earned = progress.earned;
+        view.earned_hardcore = progress.earned_hardcore;
+        view.completion = progress.completion;
+        view.fetched_at = progress.fetched_at;
+        view.achievements = progress
+            .achievements
+            .into_iter()
+            .map(|a| RaBadge { picture: ra::badge(&badges, &a.badge).and_then(|p| data_url(&p)), a })
+            .collect();
+        Ok(view)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A RetroAchievements game page RecompHUB itself linked to (from a cached lookup).
+fn known_ra_page(state: &AppState, url: &str) -> bool {
+    let Some(id) = url.strip_prefix("https://retroachievements.org/game/") else { return false };
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let Ok(dirs) = std::fs::read_dir(state.ra_dir.join("perfis")) else { return false };
+    dirs.flatten().filter(|d| d.path().is_dir()).any(|d| {
+        std::fs::read_dir(d.path()).into_iter().flatten().flatten().any(|f| {
+            std::fs::read(f.path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<ra::Progress>(&b).ok())
+                .map(|p| p.game_id.to_string() == id)
+                .unwrap_or(false)
+        })
+    })
+}
+
 // ---- Perfis ----
+
+/// A profile as the page sees it: never the RetroAchievements key.
+#[derive(Serialize, Clone)]
+struct ProfileView {
+    id: String,
+    name: String,
+    color: String,
+    ra_user: String,
+    has_ra_key: bool,
+}
+
+impl From<&profiles::Profile> for ProfileView {
+    fn from(p: &profiles::Profile) -> Self {
+        Self { id: p.id.clone(), name: p.name.clone(), color: p.color.clone(), ra_user: p.ra_user.clone(), has_ra_key: !p.ra_key.is_empty() }
+    }
+}
 
 #[derive(Serialize)]
 struct ProfilesView {
-    active: profiles::Profile,
-    list: Vec<profiles::Profile>,
+    active: ProfileView,
+    list: Vec<ProfileView>,
     ask_on_start: bool,
     separate_saves: Vec<String>,
     colors: &'static [&'static str],
@@ -1832,8 +1999,8 @@ struct ProfilesView {
 fn profiles_view(state: &AppState) -> ProfilesView {
     let p = state.profiles.lock().unwrap();
     ProfilesView {
-        active: p.active().clone(),
-        list: p.list.clone(),
+        active: p.active().into(),
+        list: p.list.iter().map(ProfileView::from).collect(),
         ask_on_start: p.ask_on_start,
         separate_saves: p.separate_saves.clone(),
         colors: profiles::COLORS,
@@ -1859,7 +2026,7 @@ fn create_profile(app: AppHandle, name: String, color: String) -> Result<Profile
             return Err("O RecompHUB guarda até 12 perfis.".into());
         }
         let id = profiles::new_id(&p, &name, library::now());
-        p.list.push(profiles::Profile { id, name, color: clean_color(&color), created: library::now() });
+        p.list.push(profiles::Profile { id, name, color: clean_color(&color), created: library::now(), ra_user: String::new(), ra_key: String::new() });
         p.save(&state.profiles_path)?;
     }
     Ok(profiles_view(&state))
@@ -1897,6 +2064,8 @@ fn delete_profile(app: AppHandle, id: String) -> Result<ProfilesView, String> {
     }
     let _ = std::fs::remove_file(state.profiles_dir.join(format!("{id}.json")));
     let _ = std::fs::remove_dir_all(state.profiles_dir.join("saves").join(&id));
+    let _ = std::fs::remove_file(state.achievements_dir.join(format!("{id}.json")));
+    let _ = std::fs::remove_dir_all(state.ra_dir.join("perfis").join(&id));
     {
         let mut h = state.history.lock().unwrap();
         h.sessions.retain(|r| r.profile != id);
@@ -2214,6 +2383,7 @@ pub fn run() {
                 profiles_path: dir.join("profiles.json"),
                 profiles_dir: dir.join("profiles"),
                 achievements_dir: dir.join("achievements"),
+                ra_dir: dir.join("retroachievements"),
                 overlay_queue: Mutex::new(VecDeque::new()),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
@@ -2266,6 +2436,8 @@ pub fn run() {
             get_achievement_settings,
             set_achievement_settings,
             test_achievement_notice,
+            set_ra_account,
+            get_ra,
             play,
             stop_game,
             open_saves,

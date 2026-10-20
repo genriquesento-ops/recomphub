@@ -21,6 +21,11 @@ pub struct Profile {
     pub name: String,
     pub color: String,
     pub created: u64,
+    /// RetroAchievements account (ra.rs), read only. The key never goes back to the page.
+    #[serde(default)]
+    pub ra_user: String,
+    #[serde(default)]
+    pub ra_key: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -43,7 +48,7 @@ impl Default for Profiles {
     fn default() -> Self {
         Self {
             active: MAIN.into(),
-            list: vec![Profile { id: MAIN.into(), name: "Principal".into(), color: COLORS[0].into(), created: 0 }],
+            list: vec![Profile { id: MAIN.into(), name: "Principal".into(), color: COLORS[0].into(), created: 0, ra_user: String::new(), ra_key: String::new() }],
             ask_on_start: true,
             separate_saves: Vec::new(),
         }
@@ -216,7 +221,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("recomphub-profiles-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut profiles = Profiles::default();
-        let ana = Profile { id: "ana".into(), name: "Ana".into(), color: COLORS[1].into(), created: 1 };
+        let ana = Profile { id: "ana".into(), name: "Ana".into(), color: COLORS[1].into(), created: 1, ra_user: String::new(), ra_key: String::new() };
         profiles.list.push(ana);
         let mut lib = lib_with("banjo", 3600, true);
 

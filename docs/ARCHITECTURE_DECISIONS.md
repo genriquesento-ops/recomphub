@@ -149,6 +149,18 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     ou tela cheia sem bordas; em tela cheia exclusiva a conquista fica registrada sem aviso. O
     Steam Achievement Notifier não tem licença: dele vieram só ideias, nenhum código.
 
+## RetroAchievements
+
+36. **Só leitura, por perfil, com a conta do próprio jogador.** Cada perfil pode ter usuário e
+    Web API Key do RetroAchievements (a chave nunca volta para a página). A página de um port de
+    N64 mostra o que o jogador ganhou no jogo ORIGINAL em emuladores; nada é enviado nem
+    desbloqueado lá (decisão 32).
+37. **O jogo é achado pela ROM, não por um id escrito à mão.** O RetroAchievements identifica
+    jogos de N64 pelo MD5 da ROM em .z64, que é como os ports guardam a ROM do jogador. A lista de
+    jogos do console (com os hashes) fica em cache por uma semana, o progresso de cada jogo por 6
+    horas (ou "Atualizar agora") e os ícones das conquistas para sempre. Uma ROM que o
+    RetroAchievements não conhece mostra só um aviso.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

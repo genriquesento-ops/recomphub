@@ -67,6 +67,12 @@ pub fn serial(game: &GameDef) -> Option<String> {
     }
 }
 
+/// The player's ROM as the port stored it (.z64 byte order), once provided.
+pub fn n64_rom_file(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
+    let Verifier::N64Rom { game_id, .. } = &game.files else { return None };
+    Some(n64::data_dir(&game.files, install_dir)?.join(format!("{game_id}.z64")))
+}
+
 /// An N64: Recompiled port's cartridge save (`<data>/saves/<game_id>.bin`, N64 byte order).
 pub fn n64_save_file(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     let Verifier::N64Rom { game_id, .. } = &game.files else { return None };

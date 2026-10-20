@@ -634,7 +634,8 @@ function renderProfileChip() {
 
 // Everything cached on screen belongs to the previous profile.
 function forgetProfileCaches() {
-  for (const c of [historyCache, backupCache, achCache]) for (const id of Object.keys(c)) delete c[id];
+  for (const c of [historyCache, backupCache, achCache, raCache]) for (const id of Object.keys(c)) delete c[id];
+  raResult = null;
   statsData = null;
 }
 
@@ -694,6 +695,7 @@ function renderProfiles() {
           ${x.id === p.active.id ? '' : `<button class="ghost danger small" data-act="profile-delete" data-id="${esc(x.id)}">Apagar</button>`}
         </li>`).join('')}</ul>
       ${profileFormHtml()}
+      ${raAccountBox()}
       <div class="box">
         <label class="check"><input type="checkbox" id="profile-ask" ${p.ask_on_start ? 'checked' : ''}>
           Perguntar "Quem vai jogar?" ao abrir o RecompHUB (quando houver mais de um perfil).</label>
@@ -708,6 +710,7 @@ function renderProfiles() {
 
 async function openProfiles() {
   await loadProfiles();
+  raResult = null;
   profileForm = null;
   openId = '__profiles';
   render();
@@ -867,6 +870,87 @@ function achievementsSummaryHtml() {
         <li><span class="name">${esc(title)}</span>
           <span class="track"><span style="width:${total ? Math.round((done / total) * 100) : 0}%"></span></span>
           <span class="muted">${done} de ${total}</span></li>`).join('')}</ul>
+    </div>`;
+}
+
+// ---- RetroAchievements (só leitura, jogo original em emuladores) ----
+
+const raCache = {};   // id -> 'loading' | RaView | { error }
+let raResult = null;  // last "Salvar e testar" on the Perfis page
+
+function raBoxHtml(g) {
+  const r = raCache[g.id];
+  const head = '<h3>RetroAchievements: o jogo original</h3>';
+  if (!r || r === 'loading') return `<div class="box">${head}<p class="muted">Carregando…</p></div>`;
+  if (r.error) return `<div class="box">${head}<p class="muted">${esc(r.error)}</p>
+    <div class="row"><button class="ghost" data-act="ra-refresh">Tentar de novo</button></div></div>`;
+  if (!r.linked) return '';
+  if (r.message) return `<div class="box">${head}<p class="muted">${esc(r.message)}</p></div>`;
+  const earnedCount = r.achievements.filter((a) => a.earned || a.earned_hardcore).length;
+  return `
+    <details class="box ra-box">
+      <summary>${head}</summary>
+      <p><b>${esc(r.user)}</b>: ${r.earned} de ${r.total} conquistas${r.earned_hardcore ? ` (${r.earned_hardcore} no modo hardcore)` : ''}
+        ${r.completion ? `· ${esc(r.completion)}` : ''}</p>
+      <div class="progress"><div style="width:${r.total ? Math.round((r.earned / r.total) * 100) : 0}%"></div></div>
+      <ul class="achs">${r.achievements.map((a) => `
+        <li class="ach${a.earned || a.earned_hardcore ? '' : ' locked'}">
+          <span class="ach-badge">${a.picture ? `<img src="${a.picture}" alt="">` : '🏆'}</span>
+          <span class="ach-text"><b>${esc(a.title)}</b><span class="muted">${esc(a.description)}</span>
+            ${a.earned_hardcore ? `<span class="muted small-text">Hardcore em ${esc(a.earned_hardcore)}</span>`
+              : a.earned ? `<span class="muted small-text">Em ${esc(a.earned)}</span>` : ''}</span>
+          <span class="ach-pts">${a.points}</span>
+        </li>`).join('')}</ul>
+      <p class="muted">Conquistas que você ganhou no RetroAchievements jogando o jogo original em emuladores aprovados por
+        ele. O RecompHUB só mostra; jogar o port não desbloqueia nada lá. Atualizado em ${sessionDate(r.fetched_at)}
+        (no máximo a cada 6 horas). ${earnedCount ? '' : 'Ainda nenhuma ganha.'}</p>
+      <div class="row">
+        <button class="ghost" data-act="ra-refresh">Atualizar agora</button>
+        ${r.page ? `<button class="link" data-act="link" data-url="${esc(r.page)}">Página do jogo no RetroAchievements</button>` : ''}
+      </div>
+    </details>`;
+}
+
+async function loadRa(id, force) {
+  raCache[id] = 'loading';
+  if (openId === id) render();
+  try {
+    raCache[id] = await invoke('get_ra', { id, force });
+  } catch (e) {
+    raCache[id] = { error: String(e) };
+  }
+  if (openId === id) render();
+}
+
+function decorateRa(g) {
+  // Only N64 ports: RetroAchievements finds the game by the player's ROM.
+  if (!g.in_library || g.kind !== 'port' || g.files_kind !== 'file') return;
+  if (raCache[g.id] === undefined) {
+    raCache[g.id] = 'loading';
+    setTimeout(() => loadRa(g.id, false), 0);
+  }
+  const ach = document.querySelector('#detail .ach-box');
+  if (ach) ach.insertAdjacentHTML('afterend', raBoxHtml(g));
+}
+
+function raAccountBox() {
+  const p = profiles.active;
+  return `
+    <div class="box">
+      <h3>RetroAchievements do perfil ${esc(p.name)} (opcional)</h3>
+      <p class="muted">Com seu usuário e sua chave de API (no site, em Configurações → Chaves → Web API Key), a página de cada
+        port de N64 mostra as conquistas que você ganhou no jogo original em emuladores. Só leitura.</p>
+      <div class="tags-edit">
+        <input type="text" id="ra-user" maxlength="40" value="${esc(p.ra_user)}" placeholder="Usuário">
+        <input type="password" id="ra-key" maxlength="64" autocomplete="off" placeholder="${p.has_ra_key ? 'Chave guardada (vazio mantém)' : 'Web API Key'}">
+      </div>
+      <div class="row">
+        <button data-act="ra-save">Salvar e testar</button>
+        ${p.has_ra_key ? '<button class="ghost danger" data-act="ra-clear">Desconectar</button>' : ''}
+        <button class="link" data-act="link" data-url="https://retroachievements.org/settings">Abrir o site</button>
+      </div>
+      ${raResult ? `<p class="${raResult.ok ? 'ok-text' : 'bad-text'}">${esc(raResult.message)}</p>` : ''}
+      <p class="muted">A chave fica só neste PC e só vai para o RetroAchievements.</p>
     </div>`;
 }
 
@@ -1154,6 +1238,7 @@ function renderDetail() {
   decorateProgress(g);
   decorateBackups(g);
   decorateAchievements(g);
+  decorateRa(g);
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
     el.addEventListener('click', () => act(el.dataset.act, g, el)));
 }
@@ -1625,6 +1710,28 @@ async function act(action, g, el) {
     case 'ach-test':
       await call('test_achievement_notice');
       break;
+    case 'ra-refresh':
+      await loadRa(g.id, true);
+      break;
+    case 'ra-save':
+    case 'ra-clear': {
+      const clear = action === 'ra-clear';
+      el.disabled = true;
+      try {
+        const message = await invoke('set_ra_account', {
+          user: clear ? '' : $('#ra-user').value,
+          key: clear ? '' : $('#ra-key').value,
+          clear,
+        });
+        raResult = { ok: true, message };
+      } catch (e) {
+        raResult = { ok: false, message: String(e) };
+      }
+      await loadProfiles();
+      for (const id of Object.keys(raCache)) delete raCache[id];
+      render();
+      break;
+    }
     case 'settings-save':
       settings = await call('set_settings', {
         closeToTray: $('#set-tray').checked,

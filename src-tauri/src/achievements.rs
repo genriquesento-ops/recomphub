@@ -105,7 +105,7 @@ pub fn builtin() -> &'static Defs {
 }
 
 /// Every achievement of a game: the general ones, then the game's own.
-pub fn for_game(defs: &Defs, game: &str) -> (Vec<Def>, Option<&GameSet>) {
+pub fn for_game<'a>(defs: &'a Defs, game: &str) -> (Vec<Def>, Option<&'a GameSet>) {
     let set = defs.games.get(game);
     let mut list = defs.generic.clone();
     if let Some(s) = set {
