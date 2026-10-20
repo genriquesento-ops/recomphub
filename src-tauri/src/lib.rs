@@ -1,3 +1,4 @@
+mod autosave;
 mod catalog;
 mod catalog_sync;
 mod community;
@@ -7,6 +8,7 @@ mod github;
 mod history;
 mod install;
 mod library;
+mod ludusavi;
 mod meta;
 mod play;
 mod saves;
@@ -44,6 +46,8 @@ pub struct AppState {
     pub pending_root: PathBuf,
     /// Dated .zip files from "Backup dos saves".
     pub backups_root: PathBuf,
+    /// Automatic backups, one folder per game (autosave.rs).
+    pub auto_root: PathBuf,
     /// Aba Comunidade cache (community.json).
     pub community_path: PathBuf,
     /// SteamGridDB and IGDB lookups (meta/<id>.json and pictures).
@@ -524,6 +528,7 @@ fn open_link(app: AppHandle, url: String) -> Result<(), String> {
         || url == community::LIST_PAGE
         || url == meta::SGDB_KEY_PAGE
         || url == meta::IGDB_KEY_PAGE
+        || url == ludusavi::PROJECT_PAGE
         || known_igdb_page(&state, &url)
         || url
             .strip_prefix("https://github.com/")
@@ -1282,6 +1287,274 @@ async fn backup_saves(app: AppHandle) -> Result<BackupResult, String> {
     Ok(BackupResult { path: path.display().to_string(), games, files })
 }
 
+/// Folders whose contents count as the game's saves, labelled for the backup .zip.
+/// Catalog port: the port's save folder. Community port: its save folders inside the port.
+/// PC game: none (Ludusavi knows them).
+pub(crate) fn save_sources(state: &AppState, id: &str) -> Vec<(String, PathBuf)> {
+    let Some(entry) = state.library.lock().unwrap().games.get(id).cloned() else { return vec![] };
+    let dir = PathBuf::from(&entry.install_dir);
+    match entry.kind {
+        library::EntryKind::Port => catalog::get(id)
+            .and_then(|game| files::save_dir(game, &dir))
+            .map(|d| vec![("saves".to_string(), d)])
+            .unwrap_or_default(),
+        library::EntryKind::Community => ["saves", "save", "savedata", "user"]
+            .iter()
+            .map(|n| (n.to_string(), dir.join(n)))
+            .filter(|(_, p)| p.is_dir())
+            .collect(),
+        library::EntryKind::PcGame => vec![],
+    }
+}
+
+#[derive(Serialize, Clone)]
+struct BackupEvent {
+    id: String,
+    title: String,
+    /// "created", "unchanged", "ludusavi" or "error"
+    result: &'static str,
+    message: String,
+}
+
+/// After a session: a backup of the saves (when they changed), and for PC games, Ludusavi's
+/// backup when the player turned it on. Runs on its own thread.
+pub(crate) fn backup_after_session(app: AppHandle, id: String) {
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let settings = state.settings.lock().unwrap().clone();
+        let Ok(view) = view_any(&state, &id) else { return };
+        let title = view.title.clone();
+        let emit = |result: &'static str, message: String| {
+            let _ = app.emit("backup", BackupEvent { id: id.clone(), title: title.clone(), result, message });
+        };
+        let sources = save_sources(&state, &id);
+        if settings.auto_backup && !sources.is_empty() {
+            match autosave::make(&state.auto_root, &id, &sources, "ao fechar o jogo", settings.backup_keep as usize, library::now()) {
+                Ok(autosave::Made::Created(_)) => emit("created", format!("Backup dos saves de {title} feito.")),
+                Ok(_) => {}
+                Err(e) => emit("error", format!("{title}: {e}")),
+            }
+        }
+        if settings.ludusavi_auto && view.kind == "pc_game" {
+            if let Some(exe) = ludusavi::locate(&settings.ludusavi_path) {
+                match ludusavi_backup_now(&state, &id, &exe) {
+                    Ok(o) if o.processed => emit("ludusavi", format!("Ludusavi: backup de {} ({} arquivo(s)).", o.name, o.files)),
+                    Ok(_) => {}
+                    Err(e) => emit("error", format!("Ludusavi, {title}: {e}")),
+                }
+            }
+        }
+    });
+}
+
+fn ludusavi_backup_now(state: &AppState, id: &str, exe: &Path) -> Result<ludusavi::Outcome, String> {
+    let (known, title) = {
+        let lib = state.library.lock().unwrap();
+        let e = lib.games.get(id).ok_or("Jogo fora da biblioteca.")?;
+        (e.ludusavi_name.clone(), e.title.clone().unwrap_or_default())
+    };
+    let name = match known {
+        Some(n) => n,
+        None => {
+            let n = ludusavi::find(exe, &title)?.ok_or_else(|| {
+                format!("o Ludusavi não conhece \"{title}\". Escreva o nome como o Ludusavi chama o jogo na página do jogo.")
+            })?;
+            if let Some(e) = state.library.lock().unwrap().games.get_mut(id) {
+                e.ludusavi_name = Some(n.clone());
+            }
+            save(state)?;
+            n
+        }
+    };
+    ludusavi::backup(exe, &name)
+}
+
+#[derive(Serialize)]
+struct GameBackups {
+    backups: Vec<autosave::BackupInfo>,
+    /// Where the saves are (label, folder).
+    sources: Vec<(String, String)>,
+    last_change: Option<u64>,
+    keep: u32,
+    auto_backup: bool,
+    /// PC game: Ludusavi found on this PC, and the name it knows the game by.
+    ludusavi: Option<String>,
+    ludusavi_name: Option<String>,
+}
+
+#[tauri::command]
+async fn get_backups(app: AppHandle, id: String) -> Result<GameBackups, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let settings = state.settings.lock().unwrap().clone();
+        let sources = save_sources(&state, &id);
+        let ludusavi_name = state.library.lock().unwrap().games.get(&id).and_then(|e| e.ludusavi_name.clone());
+        GameBackups {
+            backups: autosave::list(&state.auto_root, &id),
+            last_change: autosave::newest_change(&sources),
+            sources: sources.iter().map(|(l, p)| (l.clone(), p.display().to_string())).collect(),
+            keep: settings.backup_keep,
+            auto_backup: settings.auto_backup,
+            ludusavi: ludusavi::locate(&settings.ludusavi_path).map(|p| p.display().to_string()),
+            ludusavi_name,
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+fn not_running(state: &AppState, id: &str) -> Result<(), String> {
+    let s = state.sessions.lock().unwrap();
+    if s.is_running(id) || s.is_launching(id) {
+        return Err("Feche o jogo primeiro.".into());
+    }
+    Ok(())
+}
+
+/// "Fazer backup agora".
+#[tauri::command]
+async fn backup_now(app: AppHandle, id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let sources = save_sources(&state, &id);
+        if sources.is_empty() {
+            return Err("O RecompHUB não sabe onde este jogo guarda os saves.".to_string());
+        }
+        let keep = state.settings.lock().unwrap().backup_keep as usize;
+        match autosave::make(&state.auto_root, &id, &sources, "manual", keep, library::now())? {
+            autosave::Made::Created(b) => Ok(format!("Backup feito: {} arquivo(s).", b.files)),
+            autosave::Made::Unchanged => Ok("Os saves não mudaram desde o último backup.".to_string()),
+            autosave::Made::Empty => Err("Ainda não há saves deste jogo.".to_string()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Puts a backup back, after backing up the saves as they are now.
+#[tauri::command]
+async fn restore_backup(app: AppHandle, id: String, file: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        not_running(&state, &id)?;
+        let sources = save_sources(&state, &id);
+        if sources.is_empty() {
+            return Err("O RecompHUB não sabe onde este jogo guarda os saves.".to_string());
+        }
+        let keep = state.settings.lock().unwrap().backup_keep as usize;
+        // Nothing is trimmed until the restore is done, so the chosen backup cannot go away.
+        autosave::make(&state.auto_root, &id, &sources, "antes de restaurar", usize::MAX, library::now())?;
+        let n = autosave::restore(&state.auto_root, &id, &file, &sources)?;
+        autosave::trim(&state.auto_root, &id, keep);
+        Ok(format!("Backup restaurado ({n} arquivo(s)). Os saves de antes ficaram num backup \"antes de restaurar\"."))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn set_backup_locked(app: AppHandle, id: String, file: String, locked: bool) -> Result<(), String> {
+    autosave::set_locked(&app.state::<AppState>().auto_root, &id, &file, locked)
+}
+
+#[tauri::command]
+fn open_game_backups(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if !state.library.lock().unwrap().games.contains_key(&id) {
+        return Err("Jogo fora da biblioteca.".into());
+    }
+    let folder = state.auto_root.join(&id);
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    app.opener().open_path(folder.display().to_string(), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct BackupSettings {
+    auto_backup: bool,
+    backup_keep: u32,
+    ludusavi_auto: bool,
+    /// Where ludusavi.exe was found, if anywhere.
+    ludusavi: Option<String>,
+    ludusavi_page: &'static str,
+}
+
+#[tauri::command]
+fn get_backup_settings(app: AppHandle) -> BackupSettings {
+    let s = app.state::<AppState>().settings.lock().unwrap().clone();
+    BackupSettings {
+        auto_backup: s.auto_backup,
+        backup_keep: s.backup_keep,
+        ludusavi_auto: s.ludusavi_auto,
+        ludusavi: ludusavi::locate(&s.ludusavi_path).map(|p| p.display().to_string()),
+        ludusavi_page: ludusavi::PROJECT_PAGE,
+    }
+}
+
+#[tauri::command]
+fn set_backup_settings(app: AppHandle, auto_backup: bool, backup_keep: u32, ludusavi_auto: bool) -> Result<BackupSettings, String> {
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.settings.lock().unwrap();
+        s.auto_backup = auto_backup;
+        s.backup_keep = backup_keep.clamp(1, 100);
+        s.ludusavi_auto = ludusavi_auto;
+        s.save(&state.settings_path)?;
+    }
+    Ok(get_backup_settings(app))
+}
+
+/// "Escolher o ludusavi.exe".
+#[tauri::command]
+async fn choose_ludusavi(app: AppHandle) -> Result<Option<BackupSettings>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Escolha o ludusavi.exe")
+        .add_filter("Ludusavi", &["exe"])
+        .blocking_pick_file()
+        .and_then(|p| p.into_path().ok());
+    let Some(path) = picked else { return Ok(None) };
+    if !path.file_name().map(|n| n.to_string_lossy().eq_ignore_ascii_case("ludusavi.exe")).unwrap_or(false) {
+        return Err("Escolha o arquivo ludusavi.exe.".into());
+    }
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.settings.lock().unwrap();
+        s.ludusavi_path = path.display().to_string();
+        s.save(&state.settings_path)?;
+    }
+    Ok(Some(get_backup_settings(app)))
+}
+
+/// PC game: the name Ludusavi uses ("" forgets it, so it is looked up again).
+#[tauri::command]
+fn set_ludusavi_name(app: AppHandle, id: String, name: String) -> Result<GameView, String> {
+    let name = name.trim().to_string();
+    if name.len() > 200 {
+        return Err("Nome longo demais.".into());
+    }
+    update_entry(&app, &id, |e| e.ludusavi_name = Some(name).filter(|n| !n.is_empty()))
+}
+
+#[tauri::command]
+async fn ludusavi_backup(app: AppHandle, id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let path = state.settings.lock().unwrap().ludusavi_path.clone();
+        let exe = ludusavi::locate(&path).ok_or("Não encontrei o Ludusavi neste PC.")?;
+        let o = ludusavi_backup_now(&state, &id, &exe)?;
+        if o.failed {
+            Ok(format!("Ludusavi: backup de {} com falhas em alguns arquivos.", o.name))
+        } else if o.processed {
+            Ok(format!("Ludusavi: backup de {} feito ({} arquivo(s)), na pasta de backups do Ludusavi.", o.name, o.files))
+        } else {
+            Ok(format!("Ludusavi: nenhum save de {} encontrado neste PC.", o.name))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn open_backups(app: AppHandle) -> Result<(), String> {
     let folder = app.state::<AppState>().backups_root.clone();
@@ -1476,6 +1749,7 @@ pub fn run() {
                 games_root: local.join("games"),
                 pending_root: local.join("saves-pendentes"),
                 backups_root: dir.join("Backups de saves"),
+                auto_root: dir.join("Backups de saves").join("automaticos"),
                 community_path: dir.join("community.json"),
                 meta_dir: dir.join("meta"),
                 history: Mutex::new(history::History::load(&dir.join("history.json"))),
@@ -1508,6 +1782,16 @@ pub fn run() {
             set_notes,
             get_history,
             get_stats,
+            get_backups,
+            backup_now,
+            restore_backup,
+            set_backup_locked,
+            open_game_backups,
+            get_backup_settings,
+            set_backup_settings,
+            choose_ludusavi,
+            set_ludusavi_name,
+            ludusavi_backup,
             play,
             stop_game,
             open_saves,

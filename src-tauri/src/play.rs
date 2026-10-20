@@ -20,6 +20,8 @@ const SAVE_EVERY: Duration = Duration::from_secs(30);
 const MAX_TICK: Duration = Duration::from_secs(30);
 /// How long a port may take to show up after Play before "Abrindo…" is dropped.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
+/// The save folder of a running game is looked at every 5 looks (15 seconds).
+const SAVE_CHECK_EVERY: u32 = 5;
 
 pub struct Session {
     /// Unix time the port was first seen running.
@@ -29,6 +31,10 @@ pub struct Session {
     unsaved: Duration,
     /// All play time of this session, for the history.
     counted: Duration,
+    /// Looks since the session started; the save folder is checked every SAVE_CHECK_EVERY.
+    ticks: u32,
+    /// Newest change seen in the save folder.
+    last_save: Option<u64>,
 }
 
 #[derive(Default)]
@@ -141,6 +147,7 @@ fn tick(app: &AppHandle, sys: &System) {
     let mut started = Vec::new();
     let mut ended = Vec::new();
     let mut records = Vec::new();
+    let mut check_saves = Vec::new();
     let credits = {
         let mut guard = state.sessions.lock().unwrap();
         let s = &mut *guard;
@@ -149,7 +156,7 @@ fn tick(app: &AppHandle, sys: &System) {
             match (s.running.get_mut(id), running) {
                 (None, true) => {
                     s.launching.remove(id);
-                    s.running.insert(id.clone(), Session { started: now(), last_tick: at, unsaved: Duration::ZERO, counted: Duration::ZERO });
+                    s.running.insert(id.clone(), Session { started: now(), last_tick: at, unsaved: Duration::ZERO, counted: Duration::ZERO, ticks: 0, last_save: None });
                     started.push(id.clone());
                 }
                 (Some(sess), _) => {
@@ -159,6 +166,10 @@ fn tick(app: &AppHandle, sys: &System) {
                         sess.counted += gap;
                     }
                     sess.last_tick = at;
+                    sess.ticks += 1;
+                    if running && (sess.ticks == 1 || sess.ticks % SAVE_CHECK_EVERY == 0) {
+                        check_saves.push(id.clone());
+                    }
                     if !running {
                         ended.push((id.clone(), now().saturating_sub(sess.started)));
                     }
@@ -183,6 +194,10 @@ fn tick(app: &AppHandle, sys: &System) {
     let ended_ids: Vec<String> = ended.iter().map(|(id, _)| id.clone()).collect();
     credit(app, &credits, &ended_ids);
     remember(app, &started, records);
+    for (id, _) in &ended {
+        crate::backup_after_session(app.clone(), id.clone());
+    }
+    watch_saves(app, &check_saves);
     if !started.is_empty() || !ended.is_empty() {
         crate::tray::refresh(app);
     }
@@ -191,6 +206,29 @@ fn tick(app: &AppHandle, sys: &System) {
     }
     for (id, seconds) in ended {
         let _ = app.emit("session", serde_json::json!({ "id": id, "state": "ended", "seconds": seconds }));
+    }
+}
+
+/// The save watcher (as FileWatcher, but by looking, since save folders are small): when the
+/// newest file in a running game's save folder changes, "save-changed" goes to the page
+/// (and, later, to the achievements).
+fn watch_saves(app: &AppHandle, ids: &[String]) {
+    let state = app.state::<AppState>();
+    for id in ids {
+        let Some(newest) = crate::autosave::newest_change(&crate::save_sources(&state, id)) else { continue };
+        let changed = {
+            let mut s = state.sessions.lock().unwrap();
+            match s.running.get_mut(id) {
+                Some(sess) => {
+                    let before = sess.last_save.replace(newest);
+                    before.is_some() && before != Some(newest)
+                }
+                None => false,
+            }
+        };
+        if changed {
+            let _ = app.emit("save-changed", serde_json::json!({ "id": id, "at": newest }));
+        }
     }
 }
 

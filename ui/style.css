@@ -258,3 +258,15 @@ select {
 @media (max-width: 640px) {
   .top li { grid-template-columns: 1fr; gap: 4px; }
 }
+
+input[type=number] {
+  font: inherit; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 80px;
+}
+.backups { list-style: none; padding: 0; margin: 8px 0; max-height: 300px; overflow-y: auto; }
+.backups li {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 0; border-bottom: 1px solid var(--line);
+}
+.backups li .row { margin: 0; }
+button.small { font-size: 12px; padding: 5px 10px; }

@@ -95,6 +95,26 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     marca "Jogando". Dias e semanas das estatísticas começam à meia-noite do fuso do PC; a
     semana começa na segunda.
 
+## Saves automáticos
+
+25. **Backup ao fechar o jogo, como o `wrap` do Ludusavi, mas só quando algo mudou.** Cada
+    backup é um .zip em `Backups de saves/automaticos/<id>/` com `recomphub-backup.json`
+    (jogo, pastas de origem, número de arquivos e uma impressão SHA-256 dos arquivos). Se a
+    impressão for igual à do último backup, nenhum backup novo é feito. Ficam os N mais recentes
+    (10 por padrão); um backup travado (`<arquivo>.lock`) nunca é apagado nem conta no limite.
+26. **Restaurar nunca deixa uma pasta pela metade.** Antes, os saves atuais viram um backup
+    "antes de restaurar" (sem apagar nenhum antigo até o fim). O .zip inteiro é lido e conferido
+    contra a lista dele; a pasta nova é escrita ao lado da atual e as duas são trocadas por
+    renomeação. Com o jogo aberto, restaurar é recusado.
+27. **Vigia de saves por consulta, não por eventos do Windows.** As pastas de saves são pequenas
+    e o RecompHUB já olha os processos a cada 3 segundos; a cada 15 segundos ele olha o arquivo
+    mais novo da pasta do jogo aberto e avisa a página ("save-changed"). As conquistas vão usar
+    esse mesmo aviso.
+28. **Ludusavi para os Outros jogos de PC, só se o jogador tiver.** O RecompHUB procura o
+    `ludusavi.exe` (escolhido pelo jogador, winget, scoop ou PATH), nunca baixa nem instala. Usa
+    a linha de comando JSON dele (`find --api` e `backup --force --api`), e o backup fica na
+    pasta configurada no próprio Ludusavi. Só um arquivo chamado `ludusavi.exe` é executado.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

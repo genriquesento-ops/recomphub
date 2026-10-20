@@ -37,6 +37,22 @@ pub struct Settings {
     pub igdb_client_id: String,
     #[serde(default)]
     pub igdb_client_secret: String,
+    /// Back up a game's saves when it closes (autosave.rs).
+    #[serde(default = "yes")]
+    pub auto_backup: bool,
+    /// Automatic backups kept per game, locked ones not counted.
+    #[serde(default = "ten")]
+    pub backup_keep: u32,
+    /// The player's ludusavi.exe, when not found by itself.
+    #[serde(default)]
+    pub ludusavi_path: String,
+    /// Ask Ludusavi to back up "Outros jogos de PC" when they close.
+    #[serde(default)]
+    pub ludusavi_auto: bool,
+}
+
+fn ten() -> u32 {
+    10
 }
 
 fn yes() -> bool {
@@ -52,6 +68,10 @@ impl Default for Settings {
             steamgriddb_key: String::new(),
             igdb_client_id: String::new(),
             igdb_client_secret: String::new(),
+            auto_backup: true,
+            backup_keep: 10,
+            ludusavi_path: String::new(),
+            ludusavi_auto: false,
         }
     }
 }

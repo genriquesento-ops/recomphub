@@ -70,6 +70,9 @@ pub struct Entry {
     /// The player's own notes about the game.
     #[serde(default)]
     pub notes: String,
+    /// PC game: the title Ludusavi knows it by, once found (or set by the player).
+    #[serde(default)]
+    pub ludusavi_name: Option<String>,
 }
 
 /// As Playnite's completion statuses. `None`: not chosen; the page shows "Não jogado" or

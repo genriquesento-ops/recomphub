@@ -514,6 +514,105 @@ function decorateProgress(g) {
   }
 }
 
+// ---- Backups dos saves (automáticos, travar, restaurar; Ludusavi para jogos de PC) ----
+
+const backupCache = {};   // id -> 'loading' | GameBackups
+const REASON = { 'ao fechar o jogo': 'ao fechar o jogo', manual: 'manual', 'antes de restaurar': 'antes de restaurar' };
+
+function sizeLabel(bytes) {
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function backupsBoxHtml(g) {
+  const b = backupCache[g.id];
+  if (!b || b === 'loading') return '<div class="box"><h3>Backups dos saves</h3><p class="muted">Carregando…</p></div>';
+  if (g.kind === 'pc_game') {
+    if (!b.ludusavi) {
+      return `
+        <div class="box">
+          <h3>Backups dos saves</h3>
+          <p class="muted">O RecompHUB não sabe onde este jogo guarda os saves. Com o <b>Ludusavi</b> (gratuito, conhece mais de
+            19 mil jogos) instalado neste PC, o RecompHUB pede o backup a ele.</p>
+          <div class="row">
+            <button class="link" data-act="link" data-url="https://github.com/mtkennerly/ludusavi">Página do Ludusavi</button>
+            <button class="ghost" data-act="open-settings">Configurar em Configurações</button>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="box">
+        <h3>Backups dos saves (pelo Ludusavi)</h3>
+        <p class="muted">Nome do jogo no Ludusavi (deixe vazio para o RecompHUB procurar pelo nome da biblioteca):</p>
+        <div class="tags-edit">
+          <input type="text" id="ludusavi-name" value="${esc(b.ludusavi_name || '')}" placeholder="${esc(g.title)}">
+          <button data-act="ludusavi-name">Salvar nome</button>
+        </div>
+        <div class="row"><button data-act="ludusavi-backup">Fazer backup pelo Ludusavi</button></div>
+        <p class="muted">O backup vai para a pasta de backups configurada no próprio Ludusavi; restaure por ele.</p>
+      </div>`;
+  }
+  if (!b.sources.length) {
+    return `
+      <div class="box">
+        <h3>Backups dos saves</h3>
+        <p class="muted">Ainda não há pasta de saves deste jogo. Ela aparece depois que você salvar no jogo pela primeira vez.</p>
+      </div>`;
+  }
+  const running = IN_GAME.includes(g.status);
+  const list = b.backups.length ? `<ul class="backups">${b.backups.map((x) => `
+      <li>
+        <span><b>${sessionDate(x.created)}</b> · ${esc(REASON[x.reason] || x.reason)} · ${x.files} arquivo(s), ${sizeLabel(x.bytes)}</span>
+        <span class="row">
+          <button class="ghost small" data-act="backup-lock" data-file="${esc(x.file)}" data-locked="${x.locked}"
+            title="${x.locked ? 'Travado: nunca é apagado automaticamente' : 'Travar para nunca ser apagado'}">${x.locked ? '🔒 Travado' : 'Travar'}</button>
+          <button class="small" data-act="backup-restore" data-file="${esc(x.file)}" ${running ? 'disabled' : ''}>Restaurar</button>
+        </span>
+      </li>`).join('')}</ul>` : '<p class="muted">Nenhum backup ainda.</p>';
+  return `
+    <div class="box">
+      <h3>Backups dos saves</h3>
+      <p class="muted">${b.auto_backup
+        ? `Backup automático ao fechar o jogo, só quando os saves mudaram. Ficam os ${b.keep} mais recentes, além dos travados.`
+        : 'Backup automático desligado em Configurações.'}
+        ${b.last_change ? `Último save: <b>${sessionDate(b.last_change)}</b>.` : ''}</p>
+      ${list}
+      <div class="row">
+        <button data-act="backup-now">Fazer backup agora</button>
+        <button class="ghost" data-act="backup-folder">Abrir pasta dos backups</button>
+      </div>
+      <p class="muted">Restaurar troca a pasta de saves inteira pela do backup; antes disso, os saves atuais viram um backup
+        "antes de restaurar". ${b.sources.map(([, p]) => esc(p)).join(' · ')}</p>
+    </div>`;
+}
+
+function decorateBackups(g) {
+  if (!g.in_library) return;
+  if (backupCache[g.id] === undefined) {
+    backupCache[g.id] = 'loading';
+    setTimeout(async () => {
+      try {
+        backupCache[g.id] = await invoke('get_backups', { id: g.id });
+      } catch {
+        delete backupCache[g.id];
+        return;
+      }
+      if (openId === g.id) render();
+    }, 0);
+  }
+  const right = document.querySelector('#detail .detail > div:nth-child(2)');
+  if (right) right.insertAdjacentHTML('beforeend', backupsBoxHtml(g));
+}
+
+async function reloadBackups(id) {
+  try {
+    backupCache[id] = await invoke('get_backups', { id });
+  } catch {
+    delete backupCache[id];
+  }
+  if (openId === id) render();
+}
+
 let statsData = null;
 
 async function openStats() {
@@ -724,6 +823,35 @@ function keysBox() {
     </div>`;
 }
 
+let backupSettings = null;   // loaded when Configurações opens
+
+function backupSettingsBox() {
+  const b = backupSettings;
+  if (!b) return '';
+  return `
+    <div class="box">
+      <h3>Backups dos saves</h3>
+      <label class="check"><input type="checkbox" id="set-autobackup" ${b.auto_backup ? 'checked' : ''}>
+        Fazer backup dos saves quando o jogo fechar (só quando eles mudaram).</label>
+      <div class="tags-edit">
+        <label for="set-keep">Backups automáticos guardados por jogo:</label>
+        <input type="number" id="set-keep" min="1" max="100" value="${b.backup_keep}">
+      </div>
+      <p class="muted">Os mais antigos são apagados quando passa desse número. Backups travados nunca são apagados.</p>
+      <p><b>Ludusavi</b> (para os Outros jogos de PC): ${b.ludusavi
+        ? `encontrado em <code>${esc(b.ludusavi)}</code>`
+        : 'não encontrado neste PC.'}</p>
+      <label class="check"><input type="checkbox" id="set-ludusavi-auto" ${b.ludusavi_auto ? 'checked' : ''} ${b.ludusavi ? '' : 'disabled'}>
+        Pedir ao Ludusavi o backup dos jogos de PC quando eles fecharem.</label>
+      <div class="row">
+        <button data-act="backup-settings-save">Salvar</button>
+        <button class="ghost" data-act="choose-ludusavi">Escolher o ludusavi.exe</button>
+        <button class="link" data-act="link" data-url="${esc(b.ludusavi_page)}">Página do Ludusavi</button>
+      </div>
+      <p class="muted">O RecompHUB não baixa nem instala o Ludusavi: instale pela página dele (ou pelo winget) e ele é encontrado sozinho.</p>
+    </div>`;
+}
+
 function renderSettings() {
   $('#detail').innerHTML = `
     <button class="ghost back" data-act="back">← Biblioteca</button>
@@ -737,6 +865,7 @@ function renderSettings() {
           Mostrar jogos ocultos na biblioteca.</label>
         <div class="row"><button data-act="settings-save">Salvar</button></div>
       </div>
+      ${backupSettingsBox()}
       ${keysBox()}
       <p class="muted">RecompHUB versão ${esc(settings.version)}.</p>
     </div>`;
@@ -760,6 +889,7 @@ function renderDetail() {
   else renderPortDetail(g);
   decorateMeta(g);
   decorateProgress(g);
+  decorateBackups(g);
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
     el.addEventListener('click', () => act(el.dataset.act, g, el)));
 }
@@ -1053,6 +1183,53 @@ async function act(action, g, el) {
       }
       break;
     }
+    case 'backup-now':
+      el.disabled = true;
+      try {
+        toast(await invoke('backup_now', { id: g.id }));
+      } catch (e) {
+        toast(String(e), true);
+      }
+      await reloadBackups(g.id);
+      break;
+    case 'backup-folder':
+      await call('open_game_backups', { id: g.id });
+      break;
+    case 'backup-lock':
+      await call('set_backup_locked', { id: g.id, file: el.dataset.file, locked: el.dataset.locked !== 'true' });
+      await reloadBackups(g.id);
+      break;
+    case 'backup-restore': {
+      const when = el.closest('li').querySelector('b').textContent;
+      if (!confirm(`Restaurar o backup de ${when}? Os saves atuais de ${g.title} serão trocados por ele `
+        + '(antes, eles viram um backup "antes de restaurar").')) break;
+      el.disabled = true;
+      try {
+        toast(await invoke('restore_backup', { id: g.id, file: el.dataset.file }));
+      } catch (e) {
+        toast(String(e), true);
+      }
+      await reloadBackups(g.id);
+      break;
+    }
+    case 'ludusavi-name': {
+      const updated = await call('set_ludusavi_name', { id: g.id, name: $('#ludusavi-name').value });
+      if (updated) {
+        toast('Nome salvo.');
+        await reloadBackups(g.id);
+      }
+      break;
+    }
+    case 'ludusavi-backup':
+      el.disabled = true;
+      el.textContent = 'Fazendo backup…';
+      try {
+        toast(await invoke('ludusavi_backup', { id: g.id }));
+      } catch (e) {
+        toast(String(e), true);
+      }
+      await reloadBackups(g.id);
+      break;
     case 'open-settings':
       $('#btn-settings').click();
       break;
@@ -1099,6 +1276,25 @@ async function act(action, g, el) {
         toast(String(e), true);
       }
       render();
+      break;
+    }
+    case 'backup-settings-save':
+      backupSettings = await call('set_backup_settings', {
+        autoBackup: $('#set-autobackup').checked,
+        backupKeep: Math.max(1, Math.min(100, parseInt($('#set-keep').value, 10) || 10)),
+        ludusaviAuto: $('#set-ludusavi-auto').checked,
+      });
+      for (const id of Object.keys(backupCache)) delete backupCache[id];
+      toast('Configurações de backup salvas.');
+      render();
+      break;
+    case 'choose-ludusavi': {
+      const updated = await call('choose_ludusavi');
+      if (updated) {
+        backupSettings = updated;
+        for (const id of Object.keys(backupCache)) delete backupCache[id];
+        render();
+      }
       break;
     }
     case 'settings-save':
@@ -1217,6 +1413,17 @@ listen('session', async (e) => {
 });
 
 listen('open-game', (e) => openGame(e.payload));
+listen('backup', (e) => {
+  const { id, result, message } = e.payload;
+  toast(message, result === 'error');
+  reloadBackups(id);
+});
+listen('save-changed', (e) => {
+  if (backupCache[e.payload.id] && backupCache[e.payload.id] !== 'loading') {
+    backupCache[e.payload.id].last_change = e.payload.at;
+    if (openId === e.payload.id) render();
+  }
+});
 
 // Dropping the ROM (or the dump folder) on the window; the zone lights up while dragging.
 const dropHighlight = (on) => {
@@ -1608,6 +1815,7 @@ $('#btn-stats').addEventListener('click', openStats);
 $('#btn-settings').addEventListener('click', async () => {
   settings = await call('get_settings');
   keyResults = null;
+  backupSettings = await call('get_backup_settings');
   openId = '__settings';
   render();
 });
