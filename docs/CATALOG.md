@@ -75,3 +75,9 @@ O jogo não precisa de arquivos (jogo livre).
 
 `cargo test --manifest-path src-tauri/Cargo.toml --lib` valida o catálogo embutido. O mesmo
 teste roda no GitHub Actions antes de gerar o instalador.
+
+## Mods (opcional)
+
+`"mods": { "thunderstore": "zelda-64-recompiled", "game_id": "mm" }` liga a Central de Mods do port:
+`thunderstore` é a comunidade em `https://thunderstore.io/c/<comunidade>/` e `game_id` é o que os
+`.nrm` desse jogo declaram no `mod.json`. Só vale para ports `n64_rom`.

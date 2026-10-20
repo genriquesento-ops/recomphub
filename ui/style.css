@@ -319,3 +319,25 @@ button.small { font-size: 12px; padding: 5px 10px; }
 .ra-box summary { cursor: pointer; list-style: none; }
 .ra-box summary h3 { display: inline; }
 .ach-badge img { width: 100%; height: 100%; border-radius: 10px; object-fit: cover; }
+
+.mods-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+.mods-bar input { flex: 1; min-width: 200px; }
+.mods { list-style: none; padding: 0; margin: 0; }
+.mod {
+  display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); margin-bottom: 8px;
+}
+.mod.installed { border-color: rgba(76, 195, 138, .45); }
+.mod-icon { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: var(--panel-2); display: block; }
+.mod-title { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.mod-desc { margin: 3px 0; }
+.mod-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 150px; }
+.mod-busy { width: 200px; }
+.switch { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.collections { list-style: none; padding: 0; margin: 10px 0 0; }
+.collections li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 700px) {
+  .mod { grid-template-columns: 48px minmax(0, 1fr); }
+  .mod-icon { width: 48px; height: 48px; }
+  .mod-actions { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; min-width: 0; }
+}

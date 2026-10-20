@@ -171,6 +171,24 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     caminho do programa, o vigia de sessões também o reconhece pelo nome do programa; e "Fechar
     jogo" avisa que o Windows não deixa fechá-lo de fora.
 
+## Central de Mods
+
+39. **Só a Thunderstore, só a comunidade do jogo.** O catálogo diz, por port, a comunidade da
+    Thunderstore e o `game_id` dos mods (`"mods": { "thunderstore": ..., "game_id": ... }`). A
+    lista vem da API pública (a mesma do r2modman), em cache por 6 horas; pacotes marcados como
+    adultos não aparecem e os descontinuados só aparecem se já estiverem instalados. Os downloads
+    só são aceitos de `thunderstore.io` e seus subdomínios, em https. Autor e página sempre à vista.
+40. **Instalar do jeito que o port lê.** O N64ModernRuntime carrega os `.nrm` (e `.rtz`) de
+    `<dados>/mods` e liga os mods listados em `<dados>/mods.json`. O RecompHUB copia só esses
+    arquivos (achatados, nomes conferidos, extração em streaming para pacotes de vários GB), lê o
+    `mod.json` de cada `.nrm` para saber o id e recusa mod de outro jogo. Um arquivo de outro
+    pacote nunca é sobrescrito; dependências vêm antes, e as que ninguém mais usa saem junto ao
+    desinstalar. Mods que o jogador pôs à mão não são tocados.
+41. **Mods por perfil e coleções.** Cada perfil guarda os pacotes que ligou
+    (`mods/perfis/<perfil>/<jogo>.json`); antes de o jogo abrir, o `mods.json` fica igual à escolha
+    do perfil em uso. Coleções são conjuntos com nome. Tudo isso só com o jogo fechado, porque o
+    jogo reescreve o `mods.json`. Antes de instalar ou ligar um mod, backup dos saves.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

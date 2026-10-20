@@ -67,6 +67,11 @@ pub fn serial(game: &GameDef) -> Option<String> {
     }
 }
 
+/// Where an N64: Recompiled port keeps its data (saves, mods, mods.json).
+pub fn n64_data_dir(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
+    n64::data_dir(&game.files, install_dir)
+}
+
 /// The player's ROM as the port stored it (.z64 byte order), once provided.
 pub fn n64_rom_file(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     let Verifier::N64Rom { game_id, .. } = &game.files else { return None };

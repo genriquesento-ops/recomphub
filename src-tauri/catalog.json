@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "revision": 2,
+  "revision": 3,
   "ports": [
     {
       "id": "gow3",
@@ -44,6 +44,7 @@
     },
     {
       "id": "banjo",
+      "mods": { "thunderstore": "banjo-recompiled", "game_id": "bk" },
       "title": "Banjo-Kazooie",
       "family": "N64",
       "tags": ["n64", "plataforma"],
@@ -86,6 +87,7 @@
     },
     {
       "id": "mm",
+      "mods": { "thunderstore": "zelda-64-recompiled", "game_id": "mm" },
       "title": "The Legend of Zelda: Majora's Mask",
       "family": "N64",
       "tags": ["n64", "aventura"],

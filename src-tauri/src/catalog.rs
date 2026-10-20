@@ -57,8 +57,18 @@ pub enum Verifier {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct ModsDef {
+    pub thunderstore: String,
+    pub game_id: String,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct GameDef {
     pub id: String,
+    /// Central de Mods (mods.rs): the game's Thunderstore community and the game_id its
+    /// .nrm files declare. None: no mods.
+    #[serde(default)]
+    pub mods: Option<ModsDef>,
     pub title: String,
     pub family: String,
     #[serde(default)]
@@ -157,6 +167,11 @@ pub fn validate(g: &GameDef) -> Result<(), String> {
     }
     if !g.links().chain(g.cover_urls.iter().map(String::as_str)).all(|u| u.starts_with("https://")) {
         return err("links precisam ser https");
+    }
+    if let Some(m) = &g.mods {
+        if !crate::mods::valid_community(&m.thunderstore) || !slug(&m.game_id) || !matches!(g.files, Verifier::N64Rom { .. }) {
+            return err("mods inválidos");
+        }
     }
     if g.markers.is_empty() || !g.markers.iter().all(|m| safe_relative(m)) {
         return err("markers inválidos");

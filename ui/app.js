@@ -634,7 +634,7 @@ function renderProfileChip() {
 
 // Everything cached on screen belongs to the previous profile.
 function forgetProfileCaches() {
-  for (const c of [historyCache, backupCache, achCache, raCache]) for (const id of Object.keys(c)) delete c[id];
+  for (const c of [historyCache, backupCache, achCache, raCache, modsState]) for (const id of Object.keys(c)) delete c[id];
   raResult = null;
   statsData = null;
 }
@@ -954,6 +954,174 @@ function raAccountBox() {
     </div>`;
 }
 
+// ---- Central de Mods (Thunderstore) ----
+
+const modsState = {};   // id -> { view, loading, error, search, filter, sort, shown, busy, progress }
+
+function modsOf(id) {
+  if (!modsState[id]) modsState[id] = { view: null, loading: false, search: '', filter: 'all', sort: 'popular', shown: 40, busy: null, progress: null };
+  return modsState[id];
+}
+
+async function loadMods(id, force) {
+  const m = modsOf(id);
+  m.loading = true;
+  render();
+  try {
+    m.view = await invoke('get_mods', { id, force });
+  } catch (e) {
+    toast(String(e), true);
+  }
+  m.loading = false;
+  render();
+}
+
+function openModsPage(id) {
+  openId = 'm:' + id;
+  const m = modsOf(id);
+  if (!m.view) loadMods(id, false);
+  else render();
+}
+
+function modsBox(g) {
+  if (!g.has_mods || !g.in_library || ['not_installed', 'installing'].includes(g.status)) return '';
+  return `
+    <div class="box mods-teaser">
+      <h3>Central de Mods</h3>
+      <p class="muted">Mods da comunidade para ${esc(g.title)}, direto da Thunderstore: instale com um clique, com as dependências,
+        e ligue ou desligue quando quiser. Cada perfil tem os próprios mods ligados.</p>
+      <div class="row"><button class="primary" data-act="mods-open">Abrir Central de Mods</button></div>
+    </div>`;
+}
+
+const fmtCount = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)} mil` : String(n));
+
+function modRowHtml(r, m, running) {
+  const busy = m.busy === r.full_name;
+  const p = busy && m.progress ? m.progress : null;
+  const pct = p && p.total ? Math.round((p.done / p.total) * 100) : 0;
+  let actions;
+  if (busy) {
+    actions = `<div class="mod-busy"><span class="muted">${p ? `Baixando ${esc(p.package)} (${p.step} de ${p.steps}) · ${pct}%` : 'Preparando…'}</span>
+      <div class="progress"><div style="width:${pct}%"></div></div></div>`;
+  } else if (r.installed) {
+    actions = `
+      <label class="switch" title="Ligar ou desligar para o perfil em uso">
+        <input type="checkbox" data-act="mod-toggle" data-pkg="${esc(r.full_name)}" ${r.enabled ? 'checked' : ''} ${running || m.busy ? 'disabled' : ''}>
+        <span>${r.enabled ? 'Ligado' : 'Desligado'}</span></label>
+      ${r.update ? `<button class="small" data-act="mod-install" data-pkg="${esc(r.full_name)}" ${running || m.busy ? 'disabled' : ''}>Atualizar para ${esc(r.version)}</button>` : ''}
+      <button class="ghost small danger" data-act="mod-remove" data-pkg="${esc(r.full_name)}" ${running || m.busy ? 'disabled' : ''}>Desinstalar</button>`;
+  } else {
+    actions = `<button class="primary small" data-act="mod-install" data-pkg="${esc(r.full_name)}" ${running || m.busy ? 'disabled' : ''}>Instalar</button>`;
+  }
+  return `
+    <li class="mod${r.installed ? ' installed' : ''}">
+      ${r.icon ? `<img class="mod-icon" src="${esc(r.icon)}" alt="" loading="lazy">` : '<span class="mod-icon"></span>'}
+      <div class="mod-main">
+        <div class="mod-title"><b>${esc(r.name.replace(/_/g, ' '))}</b> <span class="muted">por ${esc(r.owner)} · v${esc(r.version)}</span>
+          ${r.installed ? `<span class="chip ready">instalado${r.as_dependency ? ' (dependência)' : ''}</span>` : ''}
+          ${r.update ? '<span class="chip update">versão nova</span>' : ''}
+          ${r.deprecated ? '<span class="chip needs_files">descontinuado</span>' : ''}</div>
+        <div class="mod-desc">${esc(r.description)}</div>
+        <div class="muted small-text">${sizeLabel(r.file_size)} · ${fmtCount(r.downloads)} downloads · ${r.rating} curtidas
+          ${r.dependencies.length ? ` · precisa de: ${r.dependencies.map((d) => esc(d.split('-').slice(1).join('-').replace(/_/g, ' '))).join(', ')}` : ''}
+          · <button class="link small-text" data-act="link" data-url="${esc(r.page)}">página na Thunderstore</button></div>
+      </div>
+      <div class="mod-actions">${actions}</div>
+    </li>`;
+}
+
+function renderModsPage(id) {
+  const g = games.find((x) => x.id === id);
+  const m = modsOf(id);
+  const v = m.view;
+  if (!g) { openId = null; render(); return; }
+  let body = '<p class="muted">Buscando os mods na Thunderstore…</p>';
+  if (v) {
+    const q = m.search.trim().toLowerCase();
+    let rows = v.rows.filter((r) => !q || (r.name + ' ' + r.owner + ' ' + r.description).toLowerCase().includes(q));
+    if (m.filter === 'installed') rows = rows.filter((r) => r.installed);
+    if (m.filter === 'updates') rows = rows.filter((r) => r.update);
+    if (m.filter === 'libraries') rows = rows.filter((r) => r.categories.includes('Libraries'));
+    const sorters = {
+      popular: (a, b) => b.rating - a.rating || b.downloads - a.downloads,
+      downloads: (a, b) => b.downloads - a.downloads,
+      recent: (a, b) => (b.updated > a.updated ? 1 : -1),
+      name: (a, b) => a.name.localeCompare(b.name),
+    };
+    rows.sort((a, b) => (b.installed ? 1 : 0) - (a.installed ? 1 : 0) || sorters[m.sort](a, b));
+    const installedCount = v.rows.filter((r) => r.installed).length;
+    const updates = v.rows.filter((r) => r.update).length;
+    body = `
+      ${v.error ? `<div class="box warn"><p>${esc(v.error)}</p></div>` : ''}
+      ${v.running ? '<div class="box warn"><p>O jogo está aberto. Feche o jogo para instalar, ligar ou desligar mods.</p></div>' : ''}
+      <div class="mods-bar">
+        <input type="text" id="mods-search" placeholder="Buscar mods" value="${esc(m.search)}">
+        <select id="mods-filter">
+          ${[['all', `Todos (${v.rows.length})`], ['installed', `Instalados (${installedCount})`], ['updates', `Com versão nova (${updates})`], ['libraries', 'Bibliotecas']]
+            .map(([k, l]) => `<option value="${k}" ${m.filter === k ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <select id="mods-sort">
+          ${[['popular', 'Mais curtidos'], ['downloads', 'Mais baixados'], ['recent', 'Atualizados agora'], ['name', 'Nome']]
+            .map(([k, l]) => `<option value="${k}" ${m.sort === k ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <button class="ghost" data-act="mods-refresh">Atualizar lista</button>
+      </div>
+      <ul class="mods">${rows.slice(0, m.shown).map((r) => modRowHtml(r, m, v.running)).join('') || '<p class="muted">Nenhum mod encontrado.</p>'}</ul>
+      ${rows.length > m.shown ? `<div class="row"><button class="ghost" data-act="mods-more">Mostrar mais (${rows.length - m.shown})</button></div>` : ''}
+      <div class="box">
+        <h3>Coleções</h3>
+        <p class="muted">Guarde os mods ligados agora com um nome (por exemplo "Minha run HD") e troque de conjunto com um clique.</p>
+        <div class="tags-edit">
+          <input type="text" id="collection-name" maxlength="40" placeholder="Nome da coleção">
+          <button data-act="collection-save">Salvar mods ligados</button>
+        </div>
+        ${v.collections.length ? `<ul class="collections">${v.collections.map((c) => `
+          <li><b>${esc(c.name)}</b> <span class="muted">${c.packages.length} mod(s)</span>
+            <button class="small" data-act="collection-apply" data-name="${esc(c.name)}" ${v.running ? 'disabled' : ''}>Usar</button>
+            <button class="ghost small danger" data-act="collection-delete" data-name="${esc(c.name)}">Apagar</button></li>`).join('')}</ul>` : ''}
+      </div>
+      ${v.gone.length ? `<p class="muted">Instalados mas fora da Thunderstore agora: ${v.gone.map(esc).join(', ')}.</p>` : ''}
+      <p class="muted">Mods são programas feitos pela comunidade: o RecompHUB só baixa da Thunderstore e confere se cada mod é
+        deste jogo, mas não garante o que eles fazem. Antes de instalar ou ligar um mod, ele faz backup dos seus saves.
+        Mods nunca trazem arquivos do jogo original. Pasta dos mods: <code>${esc(v.mods_folder)}</code>
+        <button class="link small-text" data-act="mods-folder">abrir</button></p>`;
+  }
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="mods-back">← ${esc(g.title)}</button>
+    <div class="covers-page mods-page">
+      <h2>Central de Mods: ${esc(g.title)}</h2>
+      <p class="muted">Da comunidade ${esc(v ? v.community : '')} na Thunderstore · perfil ${esc(profiles ? profiles.active.name : '')}
+        ${v && v.fetched_at ? ` · lista de ${sessionDate(v.fetched_at)}` : ''}</p>
+      ${body}
+    </div>`;
+  document.querySelectorAll('#detail [data-act]').forEach((el) =>
+    el.addEventListener(el.type === 'checkbox' ? 'change' : 'click', () => act(el.dataset.act, g, el)));
+  const search = document.getElementById('mods-search');
+  if (search) {
+    search.addEventListener('input', () => {
+      m.search = search.value;
+      m.shown = 40;
+      const pos = search.selectionStart;
+      render();
+      const again = document.getElementById('mods-search');
+      again.focus();
+      again.setSelectionRange(pos, pos);
+    });
+  }
+  const filter = document.getElementById('mods-filter');
+  if (filter) filter.addEventListener('change', () => { m.filter = filter.value; m.shown = 40; render(); });
+  const sort = document.getElementById('mods-sort');
+  if (sort) sort.addEventListener('change', () => { m.sort = sort.value; render(); });
+}
+
+listen('mod-progress', (e) => {
+  const m = modsState[e.payload.id];
+  if (!m) return;
+  m.progress = e.payload;
+  if (openId === 'm:' + e.payload.id) render();
+});
+
 let statsData = null;
 
 async function openStats() {
@@ -1228,6 +1396,7 @@ function renderDetail() {
   if (openId === '__stats') return renderStats();
   if (openId === '__profiles') return renderProfiles();
   if (openId && openId.startsWith('c:')) return renderCommunityItem(openId.slice(2));
+  if (openId && openId.startsWith('m:')) return renderModsPage(openId.slice(2));
   const g = games.find((x) => x.id === openId);
   if (!g) {
     openId = null;
@@ -1308,6 +1477,7 @@ function renderPortDetail(g) {
     }
     main += playRow(g, 'o port');
     main += filesBox(g);
+    main += modsBox(g);
     main += shortcutsRow(g);
     main += versionBox(g);
     main += manageRow(g);
@@ -1738,6 +1908,94 @@ async function act(action, g, el) {
     case 'run-admin': {
       const updated = await call('set_run_as_admin', { id: g.id, on: el.checked });
       if (updated) setGame(updated);
+      break;
+    }
+    case 'mods-open':
+      openModsPage(g.id);
+      break;
+    case 'mods-back':
+      openId = g.id;
+      render();
+      break;
+    case 'mods-refresh':
+      await loadMods(g.id, true);
+      break;
+    case 'mods-more':
+      modsOf(g.id).shown += 40;
+      render();
+      break;
+    case 'mods-folder':
+      await call('open_mods_folder', { id: g.id });
+      break;
+    case 'mod-install': {
+      const m = modsOf(g.id);
+      const found = m.view.rows.find((x) => x.full_name === el.dataset.pkg);
+      const r = { ...found, name: found.name.replace(/_/g, ' ') };
+      const deps = r.dependencies.filter((d) => !m.view.rows.some((x) => x.full_name === d && x.installed));
+      const big = r.file_size > 500 * 1048576 ? '\n\nÉ um pacote grande: o download pode demorar.' : '';
+      const msg = r.installed
+        ? `Atualizar ${r.name} para a versão ${r.version}?`
+        : `Instalar ${r.name}, de ${r.owner} (${sizeLabel(r.file_size)})?${deps.length ? `\n\nTambém serão instalados: ${deps.join(', ')}.` : ''}${big}\n\nMods são feitos pela comunidade. Antes, o RecompHUB faz backup dos seus saves.`;
+      if (!confirm(msg)) break;
+      m.busy = r.full_name;
+      m.progress = null;
+      render();
+      try {
+        m.view = await invoke('install_mod', { id: g.id, package: r.full_name });
+        toast(`${r.name} instalado e ligado. Abra o jogo para usar.`);
+      } catch (e) {
+        toast(String(e), true);
+      }
+      m.busy = null;
+      m.progress = null;
+      render();
+      break;
+    }
+    case 'mod-toggle': {
+      const m = modsOf(g.id);
+      try {
+        m.view = await invoke('set_mod_enabled', { id: g.id, package: el.dataset.pkg, on: el.checked });
+      } catch (e) {
+        toast(String(e), true);
+      }
+      render();
+      break;
+    }
+    case 'mod-remove': {
+      const m = modsOf(g.id);
+      if (!confirm(`Desinstalar ${el.dataset.pkg}? Os arquivos do mod saem da pasta de mods (seus saves ficam).`)) break;
+      try {
+        m.view = await invoke('uninstall_mod', { id: g.id, package: el.dataset.pkg });
+        toast('Mod desinstalado.');
+      } catch (e) {
+        toast(String(e), true);
+      }
+      render();
+      break;
+    }
+    case 'collection-save': {
+      const m = modsOf(g.id);
+      const list = await call('save_mod_collection', { id: g.id, name: $('#collection-name').value });
+      if (list) { m.view.collections = list; toast('Coleção salva.'); render(); }
+      break;
+    }
+    case 'collection-apply': {
+      const m = modsOf(g.id);
+      try {
+        const [view, missing] = await invoke('apply_mod_collection', { id: g.id, name: el.dataset.name });
+        m.view = view;
+        toast(missing.length ? `Coleção aplicada. Não instalados: ${missing.join(', ')}.` : 'Coleção aplicada.', missing.length > 0);
+      } catch (e) {
+        toast(String(e), true);
+      }
+      render();
+      break;
+    }
+    case 'collection-delete': {
+      const m = modsOf(g.id);
+      if (!confirm(`Apagar a coleção ${el.dataset.name}? Os mods continuam instalados.`)) break;
+      const list = await call('delete_mod_collection', { id: g.id, name: el.dataset.name });
+      if (list) { m.view.collections = list; render(); }
       break;
     }
     case 'settings-save':

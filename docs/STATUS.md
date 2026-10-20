@@ -19,6 +19,7 @@
 - [x] **v0.15** Fase 4: conquistas do RecompHUB (gerais por tempo e sessões; Banjo-Kazooie pelo save), aviso por cima do jogo com som, 100%, aviso de teste
 - [x] **v0.16** Fase 5: RetroAchievements só leitura, por perfil, jogo achado pelo MD5 da ROM
 - [x] **v0.17** Jogos que exigem administrador abrem pelo pedido de permissão do Windows (UAC); opção "Abrir como administrador" por jogo
+- [x] **v0.18** Central de Mods (Thunderstore) para Majora's Mask e Banjo: instalar com dependências, ligar e desligar, atualizar, desinstalar, mods por perfil, coleções
 - [ ] Repositório público, para o catálogo remoto e o aviso de versão do RecompHUB funcionarem
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 
@@ -39,6 +40,7 @@ Rodam no GitHub Actions antes de gerar o instalador (`cargo test --lib`):
 | Perfis | Cada perfil guarda o próprio progresso e a instalação é a mesma; nomes e ids de perfil; histórico e estatísticas só do perfil em uso |
 | Conquistas | `achievements.json` embutido é válido; contador inventado é recusado; o save do Banjo conta Jiggies e notas do melhor arquivo; cada conquista desbloqueia uma vez só e guarda a data |
 | RetroAchievements | Jogo achado pelo hash da ROM; progresso lido na ordem de exibição; nome de ícone não sai da pasta |
+| Central de Mods | Lista da Thunderstore só com downloads da Thunderstore; dependências antes e ciclos param; só .nrm/.rtz saem do pacote; id e jogo lidos do .nrm; mods.json preserva o que o port escreveu; dependências órfãs |
 | Instalação | A pasta única no topo do .zip é removida; zip plano fica como está |
 | Outros | Argumentos com aspas, nomes de variáveis, nomes de atalho, datas, comparação de versões |
 

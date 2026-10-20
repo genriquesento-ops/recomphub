@@ -11,6 +11,7 @@ mod install;
 mod library;
 mod ludusavi;
 mod meta;
+mod mods;
 mod play;
 mod profiles;
 mod ra;
@@ -66,6 +67,8 @@ pub struct AppState {
     pub achievements_dir: PathBuf,
     /// RetroAchievements cache: game list, progress per profile, badges.
     pub ra_dir: PathBuf,
+    /// Central de Mods: Thunderstore lists, installed packages, profile choices, collections.
+    pub mods_dir: PathBuf,
     /// Notices waiting for the window over the game.
     pub overlay_queue: Mutex<VecDeque<Notice>>,
 }
@@ -112,6 +115,8 @@ struct GameView {
     launch_args: String,
     env: Vec<library::EnvVar>,
     run_as_admin: bool,
+    /// Central de Mods available (Thunderstore community).
+    has_mods: bool,
     /// library::Completion as text ("none", "playing", "beaten"…).
     completion: library::Completion,
     play_count: u32,
@@ -235,6 +240,7 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         launch_args: entry.as_ref().map(|e| e.launch_args.clone()).unwrap_or_default(),
         env: entry.as_ref().map(|e| e.env.clone()).unwrap_or_default(),
         run_as_admin: entry.as_ref().map(|e| e.run_as_admin).unwrap_or(false),
+        has_mods: game.mods.is_some(),
         completion: entry.as_ref().map(|e| e.completion).unwrap_or_default(),
         play_count: entry.as_ref().map(|e| e.play_count).unwrap_or(0),
         notes: entry.as_ref().map(|e| e.notes.clone()).unwrap_or_default(),
@@ -308,6 +314,7 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         launch_args: entry.launch_args.clone(),
         env: entry.env.clone(),
         run_as_admin: entry.run_as_admin,
+        has_mods: false,
         completion: entry.completion,
         play_count: entry.play_count,
         notes: entry.notes.clone(),
@@ -547,6 +554,7 @@ fn open_link(app: AppHandle, url: String) -> Result<(), String> {
         || url == ludusavi::PROJECT_PAGE
         || url == ra::KEY_PAGE
         || known_ra_page(&state, &url)
+        || known_mod_page(&state, &url)
         || known_igdb_page(&state, &url)
         || url
             .strip_prefix("https://github.com/")
@@ -1576,6 +1584,433 @@ async fn ludusavi_backup(app: AppHandle, id: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+// ---- Central de Mods (Thunderstore) ----
+
+/// The game's mods setup: catalog entry, its data folder (mods/ and mods.json live there).
+fn mods_target(state: &AppState, id: &str) -> Result<(&'static GameDef, &'static catalog::ModsDef, PathBuf), String> {
+    let game = game_or_err(id)?;
+    let def = game.mods.as_ref().ok_or("Este jogo não tem Central de Mods.")?;
+    let dir = state.library.lock().unwrap().install_dir(id).ok_or("Instale o jogo primeiro.")?;
+    let data = files::n64_data_dir(game, &dir).ok_or("Não encontrei a pasta de dados do port (LOCALAPPDATA).")?;
+    Ok((game, def, data))
+}
+
+fn game_closed(state: &AppState, id: &str) -> Result<(), String> {
+    let s = state.sessions.lock().unwrap();
+    if s.is_running(id) || s.is_launching(id) {
+        return Err("Feche o jogo antes de mexer nos mods: o jogo reescreve a lista de mods ligados.".into());
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct ModRow {
+    #[serde(flatten)]
+    package: mods::Package,
+    installed: Option<String>,
+    as_dependency: bool,
+    enabled: bool,
+    update: bool,
+}
+
+#[derive(Serialize)]
+struct ModsView {
+    community: String,
+    fetched_at: u64,
+    error: Option<String>,
+    rows: Vec<ModRow>,
+    /// Installed packages that are no longer on Thunderstore.
+    gone: Vec<String>,
+    collections: Vec<mods::Collection>,
+    mods_folder: String,
+    running: bool,
+}
+
+fn mods_view(state: &AppState, id: &str, list: mods::ListCache, error: Option<String>) -> Result<ModsView, String> {
+    let (_, def, data) = mods_target(state, id)?;
+    let installed = mods::InstalledSet::load(&state.mods_dir, id);
+    let enabled = mods::enabled_in(&data.join("mods.json"));
+    let running = state.sessions.lock().unwrap().is_running(id);
+    let rows: Vec<ModRow> = list
+        .packages
+        .into_iter()
+        .filter(|p| !p.nsfw)
+        .filter(|p| !p.deprecated || installed.packages.contains_key(&p.full_name))
+        .map(|p| {
+            let i = installed.packages.get(&p.full_name);
+            ModRow {
+                installed: i.map(|i| i.version.clone()),
+                as_dependency: i.map(|i| i.as_dependency).unwrap_or(false),
+                enabled: i.map(|i| !i.mod_ids.is_empty() && i.mod_ids.iter().all(|m| enabled.contains(m))).unwrap_or(false),
+                update: i.map(|i| i.version != p.version).unwrap_or(false),
+                package: p,
+            }
+        })
+        .collect();
+    let gone = installed.packages.keys().filter(|k| !rows.iter().any(|r| &r.package.full_name == *k)).cloned().collect();
+    Ok(ModsView {
+        community: def.thunderstore.clone(),
+        fetched_at: list.fetched_at,
+        error,
+        rows,
+        gone,
+        collections: mods::collections(&state.mods_dir, id),
+        mods_folder: mods::mods_dir(&data).display().to_string(),
+        running,
+    })
+}
+
+#[tauri::command]
+async fn get_mods(app: AppHandle, id: String, force: bool) -> Result<ModsView, String> {
+    let (community, dir) = {
+        let state = app.state::<AppState>();
+        let (_, def, _) = mods_target(&state, &id)?;
+        (def.thunderstore.clone(), state.mods_dir.join("lista"))
+    };
+    let (list, error) = match mods::list(&dir, &community, force, library::now()).await {
+        Ok(l) => (l, None),
+        Err(e) => (mods::ListCache::default(), Some(e)),
+    };
+    mods_view(&app.state::<AppState>(), &id, list, error)
+}
+
+#[derive(Serialize, Clone)]
+struct ModProgress {
+    id: String,
+    package: String,
+    done: u64,
+    total: u64,
+    step: usize,
+    steps: usize,
+}
+
+/// Downloads one package zip (only from Thunderstore) into `path`, reporting progress.
+async fn download_package(app: &AppHandle, id: &str, p: &mods::Package, path: &Path, step: usize, steps: usize) -> Result<(), String> {
+    use futures_util::StreamExt;
+    use std::io::Write;
+    let resp = github::client().get(&p.download_url).send().await.map_err(|_| "sem conexão com a Thunderstore.".to_string())?;
+    let host_ok = resp.url().host_str().map(|h| h == "thunderstore.io" || h.ends_with(".thunderstore.io")).unwrap_or(false);
+    if !resp.status().is_success() || resp.url().scheme() != "https" || !host_ok {
+        return Err(format!("não consegui baixar {} da Thunderstore.", p.full_name));
+    }
+    let total = resp.content_length().unwrap_or(p.file_size);
+    let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut done = 0u64;
+    let mut last = 0u64;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| "a conexão caiu durante o download.".to_string())?;
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        done += chunk.len() as u64;
+        if done - last > 512 * 1024 || done == total {
+            last = done;
+            let _ = app.emit("mod-progress", ModProgress { id: id.into(), package: p.full_name.clone(), done, total, step, steps });
+        }
+    }
+    Ok(())
+}
+
+/// Installs (or updates) a package and everything it needs, then turns it on.
+#[tauri::command]
+async fn install_mod(app: AppHandle, id: String, package: String) -> Result<ModsView, String> {
+    if !mods::valid_package(&package) {
+        return Err("Pacote inválido.".into());
+    }
+    let (def_game_id, data, list_dir, mods_dir, sources, keep) = {
+        let state = app.state::<AppState>();
+        game_closed(&state, &id)?;
+        let (_, def, data) = mods_target(&state, &id)?;
+        (def.game_id.clone(), data, state.mods_dir.join("lista"), state.mods_dir.clone(), save_sources(&state, &id), state.settings.lock().unwrap().backup_keep as usize)
+    };
+    let community = game_or_err(&id)?.mods.as_ref().map(|m| m.thunderstore.clone()).unwrap_or_default();
+    let list = mods::list(&list_dir, &community, false, library::now()).await?;
+    let (order, missing) = mods::resolve(&list.packages, &package);
+    if !missing.is_empty() {
+        return Err(format!("Faltam na Thunderstore: {}.", missing.join(", ")));
+    }
+    // Saves first: a mod can change how the game saves.
+    if !sources.is_empty() {
+        let state = app.state::<AppState>();
+        autosave::make(&state.auto_root, &id, &sources, &format!("antes de instalar o mod {package}"), usize::MAX, library::now())?;
+        autosave::trim(&state.auto_root, &id, keep);
+    }
+    let mut installed = mods::InstalledSet::load(&mods_dir, &id);
+    let target = mods::mods_dir(&data);
+    std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+    let todo: Vec<mods::Package> = order
+        .into_iter()
+        .filter(|p| p.full_name == package || installed.packages.get(&p.full_name).map(|i| i.version != p.version).unwrap_or(true))
+        .collect();
+    let steps = todo.len();
+    for (step, p) in todo.iter().enumerate() {
+        let tmp = mods_dir.join("baixando").join(format!("{}.zip", p.full_name));
+        std::fs::create_dir_all(tmp.parent().unwrap()).map_err(|e| e.to_string())?;
+        download_package(&app, &id, p, &tmp, step + 1, steps).await?;
+        let staging = mods_dir.join("baixando").join(&p.full_name);
+        let tmp2 = tmp.clone();
+        let staging2 = staging.clone();
+        let names = tauri::async_runtime::spawn_blocking(move || {
+            let _ = std::fs::remove_dir_all(&staging2);
+            let file = std::fs::File::open(&tmp2).map_err(|e| e.to_string())?;
+            mods::extract(file, &staging2)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let _ = std::fs::remove_file(&tmp);
+        if names.is_empty() {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("{} não tem arquivos de mod (.nrm ou .rtz). Veja a página dele na Thunderstore.", p.full_name));
+        }
+        // Every .nrm must be for this game; its id goes to mods.json.
+        let mut ids = Vec::new();
+        for n in names.iter().filter(|n| n.to_lowercase().ends_with(".nrm")) {
+            match mods::nrm_manifest_file(&staging.join(n)) {
+                Some((mid, gid)) if gid.is_empty() || gid == def_game_id => ids.push(mid),
+                Some((_, gid)) => {
+                    let _ = std::fs::remove_dir_all(&staging);
+                    return Err(format!("{} é um mod de outro jogo (\"{gid}\").", p.full_name));
+                }
+                None => {
+                    let _ = std::fs::remove_dir_all(&staging);
+                    return Err(format!("{}: o arquivo {n} não é um mod válido.", p.full_name));
+                }
+            }
+        }
+        // A file another package owns is never overwritten.
+        for n in &names {
+            if let Some((other, _)) = installed
+                .packages
+                .iter()
+                .find(|(k, i)| *k != &p.full_name && i.files.iter().any(|f| f.eq_ignore_ascii_case(n)))
+            {
+                let _ = std::fs::remove_dir_all(&staging);
+                return Err(format!("{} traz o arquivo {n}, que já é do mod {other}.", p.full_name));
+            }
+        }
+        // The old version's files go; the new ones come in.
+        if let Some(old) = installed.packages.get(&p.full_name) {
+            for f in &old.files {
+                let _ = std::fs::remove_file(target.join(f));
+            }
+        }
+        for n in &names {
+            let dst = target.join(n);
+            let _ = std::fs::remove_file(&dst);
+            saves::move_tree(&staging.join(n), &dst).map_err(|e| format!("Não consegui copiar {n}: {e}"))?;
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        let was_dependency = installed.packages.get(&p.full_name).map(|i| i.as_dependency).unwrap_or(true);
+        installed.packages.insert(
+            p.full_name.clone(),
+            mods::Installed {
+                version: p.version.clone(),
+                files: names,
+                mod_ids: ids,
+                installed_at: library::now(),
+                as_dependency: p.full_name != package && was_dependency,
+                dependencies: p.dependencies.clone(),
+            },
+        );
+        installed.save(&mods_dir, &id)?;
+    }
+    if let Some(i) = installed.packages.get_mut(&package) {
+        i.as_dependency = false;
+    }
+    installed.save(&mods_dir, &id)?;
+    let state = app.state::<AppState>();
+    choose_mod(&state, &id, &package, true)?;
+    mods_view(&state, &id, list, None)
+}
+
+/// Turns a package on (with what it needs) or off for the active profile, in mods.json too.
+fn choose_mod(state: &AppState, id: &str, package: &str, on: bool) -> Result<(), String> {
+    let (_, _, data) = mods_target(state, id)?;
+    let installed = mods::InstalledSet::load(&state.mods_dir, id);
+    let profile = state.profiles.lock().unwrap().active.clone();
+    let mut chosen = mods::profile_set(&state.mods_dir, &profile, id).unwrap_or_else(|| {
+        // First choice of this profile: start from what the port has on now.
+        let enabled = mods::enabled_in(&data.join("mods.json"));
+        installed
+            .packages
+            .iter()
+            .filter(|(_, i)| !i.as_dependency && !i.mod_ids.is_empty() && i.mod_ids.iter().all(|m| enabled.contains(m)))
+            .map(|(k, _)| k.clone())
+            .collect()
+    });
+    if on {
+        chosen.insert(package.to_string());
+    } else {
+        chosen.remove(package);
+    }
+    mods::save_profile_set(&state.mods_dir, &profile, id, &chosen)?;
+    apply_mods(state, id, &installed, &chosen, &data)
+}
+
+/// mods.json gets exactly the chosen packages (and their dependencies) on, among the ones
+/// RecompHUB installed; mods the player put there by hand are left alone.
+fn apply_mods(_state: &AppState, _id: &str, installed: &mods::InstalledSet, chosen: &std::collections::BTreeSet<String>, data: &Path) -> Result<(), String> {
+    let on_packages = mods::with_dependencies(installed, chosen);
+    let mut on = Vec::new();
+    let mut off = Vec::new();
+    for (k, i) in &installed.packages {
+        if on_packages.contains(k) {
+            on.extend(i.mod_ids.iter().cloned());
+        } else {
+            off.extend(i.mod_ids.iter().cloned());
+        }
+    }
+    off.retain(|m| !on.contains(m));
+    mods::set_enabled(&data.join("mods.json"), &on, &off)
+}
+
+/// Before the game opens: the active profile's mods (when it ever chose any).
+pub(crate) fn apply_profile_mods(state: &AppState, id: &str) {
+    let Ok((_, _, data)) = mods_target(state, id) else { return };
+    let profile = state.profiles.lock().unwrap().active.clone();
+    if let Some(chosen) = mods::profile_set(&state.mods_dir, &profile, id) {
+        let installed = mods::InstalledSet::load(&state.mods_dir, id);
+        let _ = apply_mods(state, id, &installed, &chosen, &data);
+    }
+}
+
+#[tauri::command]
+async fn set_mod_enabled(app: AppHandle, id: String, package: String, on: bool) -> Result<ModsView, String> {
+    let state = app.state::<AppState>();
+    game_closed(&state, &id)?;
+    if !mods::InstalledSet::load(&state.mods_dir, &id).packages.contains_key(&package) {
+        return Err("Este mod não está instalado.".into());
+    }
+    let sources = save_sources(&state, &id);
+    if on && !sources.is_empty() {
+        let keep = state.settings.lock().unwrap().backup_keep as usize;
+        autosave::make(&state.auto_root, &id, &sources, &format!("antes de ligar o mod {package}"), usize::MAX, library::now())?;
+        autosave::trim(&state.auto_root, &id, keep);
+    }
+    choose_mod(&state, &id, &package, on)?;
+    let (_, def, _) = mods_target(&state, &id)?;
+    let list = mods::load_list(&state.mods_dir.join("lista"), &def.thunderstore).unwrap_or_default();
+    mods_view(&state, &id, list, None)
+}
+
+/// Removes a package's files (and dependencies nothing else needs).
+#[tauri::command]
+async fn uninstall_mod(app: AppHandle, id: String, package: String) -> Result<ModsView, String> {
+    let state = app.state::<AppState>();
+    game_closed(&state, &id)?;
+    let (_, def, data) = mods_target(&state, &id)?;
+    let mut installed = mods::InstalledSet::load(&state.mods_dir, &id);
+    if !installed.packages.contains_key(&package) {
+        return Err("Este mod não está instalado.".into());
+    }
+    let needed_by: Vec<String> = installed
+        .packages
+        .iter()
+        .filter(|(k, i)| *k != &package && i.dependencies.contains(&package))
+        .map(|(k, _)| k.clone())
+        .collect();
+    if !needed_by.is_empty() {
+        return Err(format!("{package} é usado por: {}. Desinstale esses antes.", needed_by.join(", ")));
+    }
+    let target = mods::mods_dir(&data);
+    let mut gone = vec![package.clone()];
+    if let Some(i) = installed.packages.get_mut(&package) {
+        i.as_dependency = true;
+    }
+    gone.extend(mods::orphans(&installed).into_iter().filter(|o| *o != package));
+    let mut ids = Vec::new();
+    for g in &gone {
+        if let Some(i) = installed.packages.remove(g) {
+            for f in &i.files {
+                let _ = std::fs::remove_file(target.join(f));
+            }
+            ids.extend(i.mod_ids);
+        }
+    }
+    installed.save(&state.mods_dir, &id)?;
+    mods::set_enabled(&data.join("mods.json"), &[], &ids)?;
+    let profile = state.profiles.lock().unwrap().active.clone();
+    if let Some(mut chosen) = mods::profile_set(&state.mods_dir, &profile, &id) {
+        for g in &gone {
+            chosen.remove(g);
+        }
+        mods::save_profile_set(&state.mods_dir, &profile, &id, &chosen)?;
+    }
+    let list = mods::load_list(&state.mods_dir.join("lista"), &def.thunderstore).unwrap_or_default();
+    mods_view(&state, &id, list, None)
+}
+
+/// "Salvar coleção": the active profile's chosen mods under a name.
+#[tauri::command]
+fn save_mod_collection(app: AppHandle, id: String, name: String) -> Result<Vec<mods::Collection>, String> {
+    let name = name.trim().chars().filter(|c| !c.is_control()).collect::<String>();
+    if name.is_empty() || name.chars().count() > 40 {
+        return Err("Dê um nome de até 40 letras para a coleção.".into());
+    }
+    let state = app.state::<AppState>();
+    let (_, _, data) = mods_target(&state, &id)?;
+    let installed = mods::InstalledSet::load(&state.mods_dir, &id);
+    let profile = state.profiles.lock().unwrap().active.clone();
+    let chosen = mods::profile_set(&state.mods_dir, &profile, &id).unwrap_or_else(|| {
+        let enabled = mods::enabled_in(&data.join("mods.json"));
+        installed
+            .packages
+            .iter()
+            .filter(|(_, i)| !i.as_dependency && !i.mod_ids.is_empty() && i.mod_ids.iter().all(|m| enabled.contains(m)))
+            .map(|(k, _)| k.clone())
+            .collect()
+    });
+    let mut list = mods::collections(&state.mods_dir, &id);
+    list.retain(|c| c.name != name);
+    list.push(mods::Collection { name, packages: chosen.into_iter().collect() });
+    mods::save_collections(&state.mods_dir, &id, &list)?;
+    Ok(list)
+}
+
+/// "Usar coleção": its installed mods on, every other one off. Returns what is missing.
+#[tauri::command]
+async fn apply_mod_collection(app: AppHandle, id: String, name: String) -> Result<(ModsView, Vec<String>), String> {
+    let state = app.state::<AppState>();
+    game_closed(&state, &id)?;
+    let (_, def, data) = mods_target(&state, &id)?;
+    let collection = mods::collections(&state.mods_dir, &id).into_iter().find(|c| c.name == name).ok_or("Coleção não encontrada.")?;
+    let installed = mods::InstalledSet::load(&state.mods_dir, &id);
+    let (chosen, missing): (Vec<String>, Vec<String>) = collection.packages.into_iter().partition(|p| installed.packages.contains_key(p));
+    let chosen: std::collections::BTreeSet<String> = chosen.into_iter().collect();
+    let profile = state.profiles.lock().unwrap().active.clone();
+    mods::save_profile_set(&state.mods_dir, &profile, &id, &chosen)?;
+    apply_mods(&state, &id, &installed, &chosen, &data)?;
+    let list = mods::load_list(&state.mods_dir.join("lista"), &def.thunderstore).unwrap_or_default();
+    Ok((mods_view(&state, &id, list, None)?, missing))
+}
+
+#[tauri::command]
+fn delete_mod_collection(app: AppHandle, id: String, name: String) -> Result<Vec<mods::Collection>, String> {
+    let state = app.state::<AppState>();
+    let mut list = mods::collections(&state.mods_dir, &id);
+    list.retain(|c| c.name != name);
+    mods::save_collections(&state.mods_dir, &id, &list)?;
+    Ok(list)
+}
+
+#[tauri::command]
+fn open_mods_folder(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (_, _, data) = mods_target(&state, &id)?;
+    let folder = mods::mods_dir(&data);
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    app.opener().open_path(folder.display().to_string(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// A Thunderstore package page or project site from a cached list.
+fn known_mod_page(state: &AppState, url: &str) -> bool {
+    let communities = catalog::games().iter().filter_map(|g| g.mods.as_ref().map(|m| m.thunderstore.clone())).collect::<Vec<_>>();
+    communities.iter().any(|c| {
+        mods::load_list(&state.mods_dir.join("lista"), c)
+            .map(|l| l.packages.iter().any(|p| p.page == url || (p.website == url && url.starts_with("https://"))))
+            .unwrap_or(false)
+    })
+}
+
 // ---- Conquistas ----
 
 /// The numbers a game's achievements can use: play time and sessions of the active profile,
@@ -2244,6 +2679,7 @@ fn play(app: AppHandle, id: String) -> Result<(), String> {
     let entry = state.library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
     let dir = PathBuf::from(&entry.install_dir);
     let exe = program_of(&id, &entry).ok_or("Jogo sem programa definido.")?;
+    apply_profile_mods(&state, &id);
     let started = play::start(&app, &id, &dir, &exe, &entry.launch_args, &entry.env, entry.run_as_admin)?;
     if started == play::Started::Admin && !entry.run_as_admin {
         // Next time straight to the prompt, and the page says why.
@@ -2408,6 +2844,7 @@ pub fn run() {
                 profiles_dir: dir.join("profiles"),
                 achievements_dir: dir.join("achievements"),
                 ra_dir: dir.join("retroachievements"),
+                mods_dir: dir.join("mods"),
                 overlay_queue: Mutex::new(VecDeque::new()),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
@@ -2462,6 +2899,14 @@ pub fn run() {
             test_achievement_notice,
             set_ra_account,
             get_ra,
+            get_mods,
+            install_mod,
+            set_mod_enabled,
+            uninstall_mod,
+            save_mod_collection,
+            apply_mod_collection,
+            delete_mod_collection,
+            open_mods_folder,
             play,
             stop_game,
             set_run_as_admin,
