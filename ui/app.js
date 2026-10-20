@@ -813,8 +813,7 @@ function achievementsBoxHtml(g) {
       <summary><h3>Conquistas: ${c.unlocked} de ${c.total} · ${c.points} de ${c.total_points} pontos</h3></summary>
       <div class="progress"><div style="width:${c.total ? Math.round((c.unlocked / c.total) * 100) : 0}%"></div></div>
       <ul class="achs">${c.list.map(achItem).join('')}</ul>
-      <p class="muted">Conquistas do RecompHUB, do perfil ${esc(profiles ? profiles.active.name : '')}: tempo de jogo e sessões
-        ${c.source ? `, além do progresso lido do seu save (só leitura; o save nunca é alterado). ${c.save_read ? '' : '<b>O save deste jogo ainda não foi encontrado.</b>'}` : '.'}
+      <p class="muted">Conquistas do RecompHUB, do perfil ${esc(profiles ? profiles.active.name : '')}: tempo de jogo e sessões${c.source ? `, além do progresso lido do seu save (só leitura; o save nunca é alterado). ${c.save_read ? '' : '<b>O save deste jogo ainda não foi encontrado.</b>'}` : '.'}
         Não são conquistas do RetroAchievements.</p>
       ${own.length && c.source ? `<p class="muted small-text">${esc(c.source)}</p>` : ''}
     </details>`;

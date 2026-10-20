@@ -1,0 +1,34 @@
+# Publishes site/ on GitHub Pages. Manual for now: GitHub Pages needs the repository to be
+# public (on the free plan). When it is, add "push: branches: [main], paths: ['site/**',
+# 'src-tauri/catalog.json']" below so the site follows every change.
+name: Site
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # The port list on the site comes from the same catalog the program uses.
+      - name: Copy the catalog
+        run: cp src-tauri/catalog.json site/catalog.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
