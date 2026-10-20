@@ -115,6 +115,20 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     a linha de comando JSON dele (`find --api` e `backup --force --api`), e o backup fica na
     pasta configurada no próprio Ludusavi. Só um arquivo chamado `ludusavi.exe` é executado.
 
+## Perfis
+
+29. **O perfil ativo mora na biblioteca.** O que é de cada jogador (tempo, última sessão,
+    favoritos, ocultos, estado, vezes jogado, anotações) fica no `library.json` para o perfil em
+    uso; trocar de perfil guarda isso em `profiles/<id>.json` e carrega o do outro. Assim o resto
+    do RecompHUB não precisa saber de perfis. O que está instalado e onde é o mesmo para todos.
+    As sessões do histórico levam o perfil; as antigas são do perfil "Principal".
+30. **Trocar de perfil só com tudo fechado.** Com um jogo aberto ou uma instalação em andamento,
+    a troca é recusada, para o tempo de jogo nunca ir para o perfil errado.
+31. **Saves separados por perfil, ligados jogo a jogo.** Ao trocar de perfil: backup dos saves
+    ("antes de trocar para o perfil X"), o conteúdo da pasta de saves vai para
+    `profiles/saves/<perfil>/<jogo>/` e o do outro perfil volta. A pasta em si fica no lugar,
+    para o port continuar achando. Ao ligar, os saves atuais ficam com o perfil em uso.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

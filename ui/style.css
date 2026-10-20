@@ -270,3 +270,34 @@ input[type=number] {
 }
 .backups li .row { margin: 0; }
 button.small { font-size: 12px; padding: 5px 10px; }
+
+.profile-chip { display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; padding: 5px 12px 5px 6px; border-radius: 99px; }
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 26px; height: 26px; border-radius: 50%; color: #14161b; font-weight: 700; font-size: 13px;
+}
+.avatar.big { width: 56px; height: 56px; font-size: 24px; }
+.profiles { list-style: none; padding: 0; margin: 12px 0; }
+.profiles li {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: var(--panel);
+}
+.profiles li.on { border-color: var(--accent); }
+.profiles li b { flex: 1; min-width: 120px; font-size: 16px; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.swatch { width: 30px; height: 30px; border-radius: 50%; padding: 0; border: 2px solid transparent; }
+.swatch.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg) inset; }
+.who {
+  position: fixed; inset: 0; z-index: 50; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 16px;
+}
+.who[hidden] { display: none; }
+.who h1 { font-size: 32px; margin: 0; }
+.who-list { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+.who-item {
+  display: flex; flex-direction: column; align-items: center; gap: 12px; width: 150px; padding: 18px 10px;
+  background: var(--panel); border: 2px solid var(--line); border-radius: 16px; font-size: 16px;
+  transition: transform .1s, border-color .1s;
+}
+.who-item .avatar.big { width: 84px; height: 84px; font-size: 36px; }
+.who-item.sel, .who-item:hover { border-color: var(--accent); transform: scale(1.05); }

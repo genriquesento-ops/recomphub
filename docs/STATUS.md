@@ -15,7 +15,7 @@
 - [x] **v0.11** Capa, banner e descrição da SteamGridDB e da IGDB com a chave do jogador, guardados no PC (busca uma vez por jogo)
 - [x] **v0.12** Perfis e Conquistas, fase 1: histórico de sessões, estado do jogo, vezes jogado, anotações, página Estatísticas
 - [x] **v0.13** Fase 2: backup automático ao fechar o jogo (só quando mudou), limite por jogo, travar, restaurar com segurança, vigia da pasta de saves, Ludusavi para jogos de PC
-- [ ] Fase 3: perfis
+- [x] **v0.14** Fase 3: perfis (progresso, histórico e anotações por jogador, "Quem vai jogar?" com mouse, teclado ou controle, saves separados por perfil jogo a jogo)
 - [ ] Fase 4: conquistas (tempo de jogo e progresso lido do save, aviso com som)
 - [ ] Fase 5: RetroAchievements (só leitura)
 - [ ] Repositório público, para o catálogo remoto e o aviso de versão do RecompHUB funcionarem
@@ -35,6 +35,7 @@ Rodam no GitHub Actions antes de gerar o instalador (`cargo test --lib`):
 | SteamGridDB e IGDB | Nome igual tem preferência sobre o primeiro resultado; só imagens dos servidores dos dois sites; a busca da IGDB não deixa o nome escapar da consulta; jogo encontrado fica guardado e jogo não encontrado é tentado de novo depois de uma semana |
 | Histórico | Sessões curtas não entram; a semana começa na segunda no fuso do jogador; totais por jogo, dia, semana, maior sessão e dias seguidos |
 | Backups automáticos | Saves iguais não geram backup novo; só os N mais recentes ficam, os travados sempre; restaurar devolve a pasta inteira e recusa backup de outro jogo ou nome inválido; resposta JSON do Ludusavi |
+| Perfis | Cada perfil guarda o próprio progresso e a instalação é a mesma; nomes e ids de perfil; histórico e estatísticas só do perfil em uso |
 | Instalação | A pasta única no topo do .zip é removida; zip plano fica como está |
 | Outros | Argumentos com aspas, nomes de variáveis, nomes de atalho, datas, comparação de versões |
 

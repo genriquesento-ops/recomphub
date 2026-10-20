@@ -19,6 +19,13 @@ pub struct Record {
     pub end: u64,
     /// Counted play time (time asleep is left out), so it can be less than end - start.
     pub seconds: u64,
+    /// Who played (profiles.rs); sessions from before profiles belong to the main one.
+    #[serde(default = "main_profile")]
+    pub profile: String,
+}
+
+fn main_profile() -> String {
+    crate::profiles::MAIN.to_string()
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -52,9 +59,9 @@ impl History {
         true
     }
 
-    /// The game's sessions, newest first.
-    pub fn of(&self, id: &str, max: usize) -> Vec<Record> {
-        self.sessions.iter().rev().filter(|r| r.id == id).take(max).cloned().collect()
+    /// The game's sessions of one profile, newest first.
+    pub fn of(&self, id: &str, profile: &str, max: usize) -> Vec<Record> {
+        self.sessions.iter().rev().filter(|r| r.id == id && r.profile == profile).take(max).cloned().collect()
     }
 }
 
@@ -98,7 +105,7 @@ pub struct Stats {
     pub streak_days: u32,
 }
 
-pub fn stats(history: &History, now: u64, offset: i64, weeks: usize) -> Stats {
+pub fn stats(history: &History, profile: &str, now: u64, offset: i64, weeks: usize) -> Stats {
     let today = day(now, offset);
     let this_week = week_start(today);
     let mut out = Stats {
@@ -108,7 +115,7 @@ pub fn stats(history: &History, now: u64, offset: i64, weeks: usize) -> Stats {
     };
     let mut games: BTreeMap<&str, GameStats> = BTreeMap::new();
     let mut played_days = std::collections::BTreeSet::new();
-    for r in &history.sessions {
+    for r in history.sessions.iter().filter(|r| r.profile == profile) {
         out.sessions += 1;
         out.seconds += r.seconds;
         let d = day(r.start, offset);
@@ -142,9 +149,10 @@ pub fn stats(history: &History, now: u64, offset: i64, weeks: usize) -> Stats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profiles::MAIN;
 
     fn rec(id: &str, start: u64, seconds: u64) -> Record {
-        Record { id: id.into(), start, end: start + seconds, seconds }
+        Record { id: id.into(), start, end: start + seconds, seconds, profile: MAIN.into() }
     }
 
     #[test]
@@ -171,7 +179,8 @@ mod tests {
         h.record(rec("banjo", now - 86_400, 600));
         h.record(rec("gow3", now - 2 * 86_400, 7200));
         h.record(rec("gow3", now - 40 * 86_400, 100)); // outside the 14 days, inside 12 weeks
-        let s = stats(&h, now, 0, 12);
+        h.record(Record { profile: "ana".into(), ..rec("gow3", now - 600, 500) });
+        let s = stats(&h, MAIN, now, 0, 12);
         assert_eq!(s.sessions, 4);
         assert_eq!(s.seconds, 9700);
         assert_eq!(s.games[0].id, "gow3");

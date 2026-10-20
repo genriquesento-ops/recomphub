@@ -148,6 +148,7 @@ fn tick(app: &AppHandle, sys: &System) {
     let mut ended = Vec::new();
     let mut records = Vec::new();
     let mut check_saves = Vec::new();
+    let profile = state.profiles.lock().unwrap().active.clone();
     let credits = {
         let mut guard = state.sessions.lock().unwrap();
         let s = &mut *guard;
@@ -185,7 +186,7 @@ fn tick(app: &AppHandle, sys: &System) {
                 if secs > 0 {
                     credits.push((id.clone(), secs));
                 }
-                records.push(record(id, &sess));
+                records.push(record(id, &sess, &profile));
             }
         }
         credits
@@ -239,7 +240,8 @@ pub fn flush(app: &AppHandle) {
         let state = app.state::<AppState>();
         let mut s = state.sessions.lock().unwrap();
         let credits = s.take_unsaved(Duration::ZERO);
-        let records: Vec<Record> = s.running.iter().map(|(id, sess)| record(id, sess)).collect();
+        let profile = state.profiles.lock().unwrap().active.clone();
+        let records: Vec<Record> = s.running.iter().map(|(id, sess)| record(id, sess, &profile)).collect();
         s.running.clear();
         (credits, records)
     };
@@ -247,8 +249,8 @@ pub fn flush(app: &AppHandle) {
     remember(app, &[], records);
 }
 
-fn record(id: &str, sess: &Session) -> Record {
-    Record { id: id.to_string(), start: sess.started, end: now(), seconds: sess.counted.as_secs() }
+fn record(id: &str, sess: &Session, profile: &str) -> Record {
+    Record { id: id.to_string(), start: sess.started, end: now(), seconds: sess.counted.as_secs(), profile: profile.to_string() }
 }
 
 /// History of finished sessions, the play count, and "Jogando" for a game played for the

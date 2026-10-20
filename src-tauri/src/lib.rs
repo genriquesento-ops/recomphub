@@ -11,6 +11,7 @@ mod library;
 mod ludusavi;
 mod meta;
 mod play;
+mod profiles;
 mod saves;
 mod shortcut;
 mod tray;
@@ -55,6 +56,10 @@ pub struct AppState {
     /// One record per play session (history.json).
     pub history: Mutex<history::History>,
     pub history_path: PathBuf,
+    /// Players on this PC (profiles.rs); progress of the inactive ones in profiles_dir.
+    pub profiles: Mutex<profiles::Profiles>,
+    pub profiles_path: PathBuf,
+    pub profiles_dir: PathBuf,
 }
 
 /// Everything the interface shows about one game.
@@ -707,8 +712,9 @@ struct GameHistory {
 #[tauri::command]
 fn get_history(app: AppHandle, id: String) -> GameHistory {
     let state = app.state::<AppState>();
+    let profile = state.profiles.lock().unwrap().active.clone();
     let h = state.history.lock().unwrap();
-    let all = h.of(&id, usize::MAX);
+    let all = h.of(&id, &profile, usize::MAX);
     let total: u64 = all.iter().map(|r| r.seconds).sum();
     GameHistory {
         sessions: all.iter().take(30).cloned().collect(),
@@ -736,8 +742,9 @@ struct StatsView {
 fn get_stats(app: AppHandle, offset_minutes: i64) -> StatsView {
     let stats = {
         let state = app.state::<AppState>();
+        let profile = state.profiles.lock().unwrap().active.clone();
         let h = state.history.lock().unwrap();
-        history::stats(&h, library::now(), offset_minutes.clamp(-14 * 60, 14 * 60) * 60, 12)
+        history::stats(&h, &profile, library::now(), offset_minutes.clamp(-14 * 60, 14 * 60) * 60, 12)
     };
     let library = get_library(app.clone());
     let mut titles: HashMap<String, String> = library.iter().map(|g| (g.id.clone(), g.title.clone())).collect();
@@ -1213,7 +1220,8 @@ fn reset_playtime(app: AppHandle, id: String) -> Result<GameView, String> {
     save(&state)?;
     {
         let mut history = state.history.lock().unwrap();
-        history.sessions.retain(|r| r.id != id);
+        let profile = state.profiles.lock().unwrap().active.clone();
+        history.sessions.retain(|r| r.id != id || r.profile != profile);
         history.save(&state.history_path)?;
     }
     view_any(&state, &id)
@@ -1555,6 +1563,199 @@ async fn ludusavi_backup(app: AppHandle, id: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+// ---- Perfis ----
+
+#[derive(Serialize)]
+struct ProfilesView {
+    active: profiles::Profile,
+    list: Vec<profiles::Profile>,
+    ask_on_start: bool,
+    separate_saves: Vec<String>,
+    colors: &'static [&'static str],
+}
+
+fn profiles_view(state: &AppState) -> ProfilesView {
+    let p = state.profiles.lock().unwrap();
+    ProfilesView {
+        active: p.active().clone(),
+        list: p.list.clone(),
+        ask_on_start: p.ask_on_start,
+        separate_saves: p.separate_saves.clone(),
+        colors: profiles::COLORS,
+    }
+}
+
+fn clean_color(color: &str) -> String {
+    profiles::COLORS.iter().find(|c| **c == color).unwrap_or(&profiles::COLORS[0]).to_string()
+}
+
+#[tauri::command]
+fn get_profiles(app: AppHandle) -> ProfilesView {
+    profiles_view(&app.state::<AppState>())
+}
+
+#[tauri::command]
+fn create_profile(app: AppHandle, name: String, color: String) -> Result<ProfilesView, String> {
+    let name = profiles::clean_name(&name)?;
+    let state = app.state::<AppState>();
+    {
+        let mut p = state.profiles.lock().unwrap();
+        if p.list.len() >= 12 {
+            return Err("O RecompHUB guarda até 12 perfis.".into());
+        }
+        let id = profiles::new_id(&p, &name, library::now());
+        p.list.push(profiles::Profile { id, name, color: clean_color(&color), created: library::now() });
+        p.save(&state.profiles_path)?;
+    }
+    Ok(profiles_view(&state))
+}
+
+#[tauri::command]
+fn edit_profile(app: AppHandle, id: String, name: String, color: String) -> Result<ProfilesView, String> {
+    let name = profiles::clean_name(&name)?;
+    let state = app.state::<AppState>();
+    {
+        let mut p = state.profiles.lock().unwrap();
+        let profile = p.list.iter_mut().find(|x| x.id == id).ok_or("Perfil não encontrado.")?;
+        profile.name = name;
+        profile.color = clean_color(&color);
+        p.save(&state.profiles_path)?;
+    }
+    tray::refresh(&app);
+    Ok(profiles_view(&state))
+}
+
+/// Deletes a profile that is not in use: its progress, history and waiting saves.
+#[tauri::command]
+fn delete_profile(app: AppHandle, id: String) -> Result<ProfilesView, String> {
+    let state = app.state::<AppState>();
+    {
+        let mut p = state.profiles.lock().unwrap();
+        if p.active == id {
+            return Err("Troque para outro perfil antes de apagar este.".into());
+        }
+        if p.get(&id).is_none() {
+            return Err("Perfil não encontrado.".into());
+        }
+        p.list.retain(|x| x.id != id);
+        p.save(&state.profiles_path)?;
+    }
+    let _ = std::fs::remove_file(state.profiles_dir.join(format!("{id}.json")));
+    let _ = std::fs::remove_dir_all(state.profiles_dir.join("saves").join(&id));
+    {
+        let mut h = state.history.lock().unwrap();
+        h.sessions.retain(|r| r.profile != id);
+        h.save(&state.history_path)?;
+    }
+    Ok(profiles_view(&state))
+}
+
+#[tauri::command]
+fn set_profile_options(app: AppHandle, ask_on_start: bool) -> Result<ProfilesView, String> {
+    let state = app.state::<AppState>();
+    {
+        let mut p = state.profiles.lock().unwrap();
+        p.ask_on_start = ask_on_start;
+        p.save(&state.profiles_path)?;
+    }
+    Ok(profiles_view(&state))
+}
+
+fn nothing_running(state: &AppState) -> Result<(), String> {
+    if !state.sessions.lock().unwrap().running.is_empty() {
+        return Err("Feche os jogos abertos antes de trocar de perfil.".into());
+    }
+    if !state.installing.lock().unwrap().is_empty() {
+        return Err("Espere a instalação terminar antes de trocar de perfil.".into());
+    }
+    Ok(())
+}
+
+/// Moves everything inside `from` into `to` (created if needed), leaving `from` empty.
+fn move_contents(from: &Path, to: &Path) -> Result<(), String> {
+    let Ok(entries) = std::fs::read_dir(from) else { return Ok(()) };
+    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    for e in entries.flatten() {
+        let dst = to.join(e.file_name());
+        if dst.exists() {
+            let _ = if dst.is_dir() { std::fs::remove_dir_all(&dst) } else { std::fs::remove_file(&dst) };
+        }
+        saves::move_tree(&e.path(), &dst).map_err(|err| format!("Não consegui mover {}: {err}", e.path().display()))?;
+    }
+    Ok(())
+}
+
+/// Games with "saves separados por perfil": a backup first, then the leaving profile's saves
+/// go to its waiting folder and the arriving profile's come back (none: an empty folder).
+/// The save folders themselves stay, so the ports keep finding them.
+fn swap_saves(state: &AppState, from: &str, to: &str, to_name: &str) -> Result<(), String> {
+    let games = state.profiles.lock().unwrap().separate_saves.clone();
+    let keep = state.settings.lock().unwrap().backup_keep as usize;
+    for id in games {
+        let sources = save_sources(state, &id);
+        if sources.is_empty() {
+            continue;
+        }
+        autosave::make(&state.auto_root, &id, &sources, &format!("antes de trocar para o perfil {to_name}"), usize::MAX, library::now())?;
+        autosave::trim(&state.auto_root, &id, keep);
+        for (label, folder) in &sources {
+            move_contents(folder, &profiles::stash(&state.profiles_dir, from, &id, label))?;
+            let waiting = profiles::stash(&state.profiles_dir, to, &id, label);
+            move_contents(&waiting, folder)?;
+            let _ = std::fs::remove_dir_all(&waiting);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn switch_profile(app: AppHandle, id: String) -> Result<ProfilesView, String> {
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<AppState>();
+        nothing_running(&state)?;
+        let (from, to_name) = {
+            let p = state.profiles.lock().unwrap();
+            let to = p.get(&id).ok_or("Perfil não encontrado.")?;
+            (p.active.clone(), to.name.clone())
+        };
+        if from == id {
+            return Ok(());
+        }
+        swap_saves(&state, &from, &id, &to_name)?;
+        let mut lib = state.library.lock().unwrap();
+        let mut p = state.profiles.lock().unwrap();
+        profiles::switch(&mut lib, &mut p, &state.profiles_dir, &id)?;
+        lib.save(&state.library_path)?;
+        p.save(&state.profiles_path)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    tray::refresh(&app);
+    Ok(profiles_view(&app.state::<AppState>()))
+}
+
+/// "Saves separados por perfil" for one game. Turning it on: the saves there now belong to
+/// the active profile; other profiles start with no saves. Turning it off: the active
+/// profile's saves stay; the other profiles' wait in their folders.
+#[tauri::command]
+fn set_separate_saves(app: AppHandle, id: String, on: bool) -> Result<ProfilesView, String> {
+    let state = app.state::<AppState>();
+    not_running(&state, &id)?;
+    if on && save_sources(&state, &id).is_empty() {
+        return Err("Ainda não há pasta de saves deste jogo. Jogue e salve uma vez antes.".into());
+    }
+    {
+        let mut p = state.profiles.lock().unwrap();
+        p.separate_saves.retain(|g| *g != id);
+        if on {
+            p.separate_saves.push(id);
+        }
+        p.save(&state.profiles_path)?;
+    }
+    Ok(profiles_view(&state))
+}
+
 #[tauri::command]
 fn open_backups(app: AppHandle) -> Result<(), String> {
     let folder = app.state::<AppState>().backups_root.clone();
@@ -1754,6 +1955,9 @@ pub fn run() {
                 meta_dir: dir.join("meta"),
                 history: Mutex::new(history::History::load(&dir.join("history.json"))),
                 history_path: dir.join("history.json"),
+                profiles: Mutex::new(profiles::Profiles::load(&dir.join("profiles.json"))),
+                profiles_path: dir.join("profiles.json"),
+                profiles_dir: dir.join("profiles"),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
@@ -1792,6 +1996,13 @@ pub fn run() {
             choose_ludusavi,
             set_ludusavi_name,
             ludusavi_backup,
+            get_profiles,
+            create_profile,
+            edit_profile,
+            delete_profile,
+            set_profile_options,
+            switch_profile,
+            set_separate_saves,
             play,
             stop_game,
             open_saves,

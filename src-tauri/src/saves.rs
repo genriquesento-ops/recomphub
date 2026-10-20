@@ -29,7 +29,7 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 /// Moves a file or folder; across drives it copies and then deletes.
-fn move_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(crate) fn move_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     if let Some(p) = dst.parent() {
         std::fs::create_dir_all(p)?;
     }

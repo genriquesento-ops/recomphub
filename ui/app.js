@@ -577,6 +577,10 @@ function backupsBoxHtml(g) {
         : 'Backup automático desligado em Configurações.'}
         ${b.last_change ? `Último save: <b>${sessionDate(b.last_change)}</b>.` : ''}</p>
       ${list}
+      ${profiles && profiles.list.length > 1 || (profiles && profiles.separate_saves.includes(g.id)) ? `
+        <label class="check"><input type="checkbox" data-act="separate-saves" data-on="${profiles.separate_saves.includes(g.id)}"
+          ${profiles.separate_saves.includes(g.id) ? 'checked' : ''} ${running ? 'disabled' : ''}>
+          Saves separados por perfil: cada perfil tem os próprios saves deste jogo (trocados ao trocar de perfil, com backup antes).</label>` : ''}
       <div class="row">
         <button data-act="backup-now">Fazer backup agora</button>
         <button class="ghost" data-act="backup-folder">Abrir pasta dos backups</button>
@@ -612,6 +616,167 @@ async function reloadBackups(id) {
   }
   if (openId === id) render();
 }
+
+// ---- Perfis ----
+
+let profiles = null;        // { active, list, ask_on_start, separate_saves, colors }
+let profileForm = null;     // { id|null, name, color } while creating or editing
+
+const avatar = (p, big = false) =>
+  `<span class="avatar${big ? ' big' : ''}" style="background:${esc(p.color)}">${esc((p.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+
+function renderProfileChip() {
+  const btn = $('#btn-profile');
+  if (!profiles) { btn.hidden = true; return; }
+  btn.hidden = false;
+  btn.innerHTML = `${avatar(profiles.active)}<span>${esc(profiles.active.name)}</span>`;
+}
+
+// Everything cached on screen belongs to the previous profile.
+function forgetProfileCaches() {
+  for (const c of [historyCache, backupCache]) for (const id of Object.keys(c)) delete c[id];
+  statsData = null;
+}
+
+async function loadProfiles() {
+  profiles = await call('get_profiles');
+  renderProfileChip();
+}
+
+async function switchProfile(id) {
+  if (profiles && profiles.active.id === id) return true;
+  try {
+    profiles = await invoke('switch_profile', { id });
+  } catch (e) {
+    toast(String(e), true);
+    return false;
+  }
+  forgetProfileCaches();
+  renderProfileChip();
+  await refresh();
+  toast(`Perfil: ${profiles.active.name}.`);
+  return true;
+}
+
+function profileFormHtml() {
+  const f = profileForm;
+  if (!f) return '<div class="row"><button class="primary" data-act="profile-new">Criar perfil</button></div>';
+  return `
+    <div class="box">
+      <h3>${f.id ? 'Editar perfil' : 'Novo perfil'}</h3>
+      <div class="tags-edit">
+        <input type="text" id="profile-name" maxlength="30" value="${esc(f.name)}" placeholder="Nome">
+      </div>
+      <div class="swatches">${profiles.colors.map((c) =>
+        `<button class="swatch${c === f.color ? ' on' : ''}" style="background:${c}" data-act="profile-color" data-color="${c}" title="Cor"></button>`).join('')}</div>
+      <div class="row">
+        <button class="primary" data-act="profile-save">${f.id ? 'Salvar' : 'Criar'}</button>
+        <button class="ghost" data-act="profile-cancel">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function renderProfiles() {
+  const p = profiles;
+  $('#detail').innerHTML = `
+    <button class="ghost back" data-act="back">← Biblioteca</button>
+    <div class="covers-page">
+      <h2>Perfis</h2>
+      <p>Cada perfil tem o próprio tempo de jogo, histórico, favoritos, ocultos, estado dos jogos e anotações.
+        Os jogos instalados são os mesmos para todos.</p>
+      <ul class="profiles">${p.list.map((x) => `
+        <li class="${x.id === p.active.id ? 'on' : ''}">
+          ${avatar(x, true)}
+          <b>${esc(x.name)}</b>
+          ${x.id === p.active.id ? '<span class="chip ready">em uso</span>'
+            : `<button class="primary small" data-act="profile-use" data-id="${esc(x.id)}">Usar este perfil</button>`}
+          <button class="ghost small" data-act="profile-edit" data-id="${esc(x.id)}">Editar</button>
+          ${x.id === p.active.id ? '' : `<button class="ghost danger small" data-act="profile-delete" data-id="${esc(x.id)}">Apagar</button>`}
+        </li>`).join('')}</ul>
+      ${profileFormHtml()}
+      <div class="box">
+        <label class="check"><input type="checkbox" id="profile-ask" ${p.ask_on_start ? 'checked' : ''}>
+          Perguntar "Quem vai jogar?" ao abrir o RecompHUB (quando houver mais de um perfil).</label>
+        <div class="row"><button data-act="profile-options">Salvar</button></div>
+      </div>
+      <p class="muted">Saves separados por perfil: ligue na caixa "Backups dos saves" da página de cada jogo.
+        Trocar de perfil é recusado com um jogo aberto.</p>
+    </div>`;
+  document.querySelectorAll('#detail [data-act]').forEach((el) =>
+    el.addEventListener('click', () => act(el.dataset.act, null, el)));
+}
+
+async function openProfiles() {
+  await loadProfiles();
+  profileForm = null;
+  openId = '__profiles';
+  render();
+}
+
+// "Quem vai jogar?": mouse, keyboard (setas + Enter) or controller (direcional + A).
+let whoSel = 0;
+const whoPad = { held: {}, nextAt: 0, repeating: false };
+
+function renderWho() {
+  const el = $('#who');
+  el.innerHTML = `
+    <h1>Quem vai jogar?</h1>
+    <div class="who-list">${profiles.list.map((x, i) => `
+      <button class="who-item${i === whoSel ? ' sel' : ''}" data-i="${i}">${avatar(x, true)}<span>${esc(x.name)}</span></button>`).join('')}</div>
+    <p class="muted">Use o mouse, as setas e Enter, ou o direcional e o botão A do controle.</p>`;
+  el.querySelectorAll('.who-item').forEach((b) => b.addEventListener('click', () => whoPick(Number(b.dataset.i))));
+}
+
+function whoOpen() {
+  whoSel = Math.max(0, profiles.list.findIndex((x) => x.id === profiles.active.id));
+  $('#who').hidden = false;
+  renderWho();
+  requestAnimationFrame(whoPoll);
+}
+
+async function whoPick(i) {
+  const p = profiles.list[i];
+  if (!p) return;
+  if (await switchProfile(p.id)) $('#who').hidden = true;
+}
+
+function whoMove(dx) {
+  whoSel = (whoSel + dx + profiles.list.length) % profiles.list.length;
+  renderWho();
+}
+
+function whoPoll(t) {
+  if ($('#who').hidden) return;
+  const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
+  if (pad) {
+    const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
+    const ax = pad.axes[0] || 0;
+    const left = b(14) || ax < -0.5;
+    const right = b(15) || ax > 0.5;
+    const a = b(0);
+    if (a && !whoPad.held.a) whoPick(whoSel);
+    whoPad.held.a = a;
+    if (left || right) {
+      if (!whoPad.held.dir || t >= whoPad.nextAt) {
+        whoMove(right ? 1 : -1);
+        whoPad.nextAt = t + (whoPad.repeating ? 160 : 400);
+        whoPad.repeating = whoPad.held.dir;
+      }
+      whoPad.held.dir = true;
+    } else {
+      whoPad.held.dir = false;
+      whoPad.repeating = false;
+    }
+  }
+  requestAnimationFrame(whoPoll);
+}
+
+document.addEventListener('keydown', (e) => {
+  if ($('#who').hidden) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { whoMove(-1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { whoMove(1); e.preventDefault(); }
+  else if (e.key === 'Enter') { whoPick(whoSel); e.preventDefault(); }
+});
 
 let statsData = null;
 
@@ -877,6 +1042,7 @@ function renderDetail() {
   if (openId === '__covers') return renderCovers();
   if (openId === '__settings') return renderSettings();
   if (openId === '__stats') return renderStats();
+  if (openId === '__profiles') return renderProfiles();
   if (openId && openId.startsWith('c:')) return renderCommunityItem(openId.slice(2));
   const g = games.find((x) => x.id === openId);
   if (!g) {
@@ -1295,6 +1461,60 @@ async function act(action, g, el) {
         for (const id of Object.keys(backupCache)) delete backupCache[id];
         render();
       }
+      break;
+    }
+    case 'profile-new':
+      profileForm = { id: null, name: '', color: profiles.colors[profiles.list.length % profiles.colors.length] };
+      render();
+      break;
+    case 'profile-edit': {
+      const p = profiles.list.find((x) => x.id === el.dataset.id);
+      profileForm = { id: p.id, name: p.name, color: p.color };
+      render();
+      break;
+    }
+    case 'profile-color':
+      profileForm.name = $('#profile-name').value;
+      profileForm.color = el.dataset.color;
+      render();
+      break;
+    case 'profile-cancel':
+      profileForm = null;
+      render();
+      break;
+    case 'profile-save': {
+      const name = $('#profile-name').value;
+      const updated = profileForm.id
+        ? await call('edit_profile', { id: profileForm.id, name, color: profileForm.color })
+        : await call('create_profile', { name, color: profileForm.color });
+      if (updated) {
+        profiles = updated;
+        profileForm = null;
+        renderProfileChip();
+        render();
+      }
+      break;
+    }
+    case 'profile-use':
+      if (await switchProfile(el.dataset.id)) render();
+      break;
+    case 'profile-delete': {
+      const p = profiles.list.find((x) => x.id === el.dataset.id);
+      if (!confirm(`Apagar o perfil ${p.name}? O tempo de jogo, o histórico, as anotações e os saves separados dele serão apagados. Os jogos continuam instalados.`)) break;
+      const updated = await call('delete_profile', { id: p.id });
+      if (updated) { profiles = updated; render(); }
+      break;
+    }
+    case 'profile-options': {
+      const updated = await call('set_profile_options', { askOnStart: $('#profile-ask').checked });
+      if (updated) { profiles = updated; toast('Salvo.'); }
+      break;
+    }
+    case 'separate-saves': {
+      const on = el.dataset.on !== 'true';
+      if (on && !confirm(`Separar os saves de ${g.title} por perfil? Os saves que estão lá agora ficam com o perfil ${profiles.active.name}; os outros perfis começam sem saves neste jogo.`)) { render(); break; }
+      const updated = await call('set_separate_saves', { id: g.id, on });
+      if (updated) { profiles = updated; render(); }
       break;
     }
     case 'settings-save':
@@ -1811,6 +2031,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('#btn-tv').addEventListener('click', tvOpen);
+$('#btn-profile').addEventListener('click', openProfiles);
 $('#btn-stats').addEventListener('click', openStats);
 $('#btn-settings').addEventListener('click', async () => {
   settings = await call('get_settings');
@@ -1845,5 +2066,8 @@ refresh()
   .then(async () => {
     const pending = await invoke('take_pending_open');
     if (pending) openGame(pending);
+    await loadProfiles();
+    // A shortcut opening a game skips the question: it is already clear who is playing.
+    if (!pending && profiles && profiles.ask_on_start && profiles.list.length > 1) whoOpen();
   })
   .then(() => invoke('check_updates').then((list) => { games = list; render(); }).catch(() => {}));
