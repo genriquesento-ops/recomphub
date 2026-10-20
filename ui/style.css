@@ -114,7 +114,7 @@ h1 { margin: 0 0 16px; font-size: 22px; }
 }
 button.tag.on { border-color: var(--accent); color: var(--accent); }
 .tags-edit { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-input[type=text] {
+input[type=text], input[type=password] {
   font: inherit; color: var(--text); background: var(--panel-2);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 240px;
 }
@@ -225,3 +225,14 @@ label.check input { margin-top: 3px; }
 .dropzone.busy { border-style: solid; color: var(--text); }
 .found { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--ok); border-radius: 8px; }
 .found p { margin: 0 0 8px; word-break: break-all; }
+
+.hero {
+  display: block; width: 100%; max-height: 220px; object-fit: cover;
+  border-radius: 12px; margin-bottom: 16px; border: 1px solid var(--line);
+}
+.box.about p { margin: 6px 0; }
+.meta-search { margin-top: 10px; }
+.meta-search summary { cursor: pointer; color: var(--muted); margin-bottom: 8px; }
+#key-sgdb, #key-igdb-id, #key-igdb-secret { margin-bottom: 8px; }
+.ok-text { color: var(--ok); }
+.bad-text { color: var(--bad); }

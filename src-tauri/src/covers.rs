@@ -6,14 +6,15 @@
 //! 1. a picture the player chose;
 //! 2. the player's own game files (the PS4 dump's icon0.png) or the port's folder;
 //! 3. a downloaded cover;
-//! 4. for PC games, the program's own icon (shown small, not as a cover).
+//! 4. a cover from SteamGridDB or IGDB (meta.rs), with the player's keys;
+//! 5. for PC games, the program's own icon (shown small, not as a cover).
 
 use serde::{Deserialize, Serialize};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp"];
 
 /// RecompHUB's own settings (settings.json).
@@ -28,6 +29,14 @@ pub struct Settings {
     /// Library shows hidden games too.
     #[serde(default)]
     pub show_hidden: bool,
+    /// The player's own SteamGridDB API key (covers and banners).
+    #[serde(default)]
+    pub steamgriddb_key: String,
+    /// The player's own Twitch application for IGDB (description, cover, artwork).
+    #[serde(default)]
+    pub igdb_client_id: String,
+    #[serde(default)]
+    pub igdb_client_secret: String,
 }
 
 fn yes() -> bool {
@@ -36,7 +45,24 @@ fn yes() -> bool {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { cover_templates: Vec::new(), close_to_tray: true, show_hidden: false }
+        Self {
+            cover_templates: Vec::new(),
+            close_to_tray: true,
+            show_hidden: false,
+            steamgriddb_key: String::new(),
+            igdb_client_id: String::new(),
+            igdb_client_secret: String::new(),
+        }
+    }
+}
+
+impl Settings {
+    pub fn keys(&self) -> crate::meta::Keys {
+        crate::meta::Keys {
+            sgdb: self.steamgriddb_key.clone(),
+            igdb_id: self.igdb_client_id.clone(),
+            igdb_secret: self.igdb_client_secret.clone(),
+        }
     }
 }
 
@@ -70,7 +96,7 @@ pub fn clean_templates(lines: &[String]) -> Result<Vec<String>, String> {
 }
 
 /// Percent-encodes everything except unreserved URL characters.
-fn encode(s: &str) -> String {
+pub(crate) fn encode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
@@ -123,7 +149,7 @@ fn sniff(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn store(dir: &Path, id: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+pub(crate) fn store(dir: &Path, id: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     let ext = sniff(bytes).ok_or("O arquivo não é uma imagem PNG, JPG ou WEBP.")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     remove_all(dir, id);

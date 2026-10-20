@@ -6,6 +6,7 @@ mod files;
 mod github;
 mod install;
 mod library;
+mod meta;
 mod play;
 mod saves;
 mod shortcut;
@@ -44,6 +45,8 @@ pub struct AppState {
     pub backups_root: PathBuf,
     /// Aba Comunidade cache (community.json).
     pub community_path: PathBuf,
+    /// SteamGridDB and IGDB lookups (meta/<id>.json and pictures).
+    pub meta_dir: PathBuf,
 }
 
 /// Everything the interface shows about one game.
@@ -91,7 +94,7 @@ struct GameView {
     total_seconds: u64,
     last_played: Option<u64>,
     cover: Option<String>,
-    /// Where the cover came from: "custom", "own_files", "downloaded" or none.
+    /// Where the cover came from: "custom", "own_files", "downloaded", "api" or none.
     cover_source: Option<&'static str>,
     /// A PC game's program icon, shown when there is no cover.
     icon: Option<String>,
@@ -102,7 +105,8 @@ fn pick_cover(state: &AppState, id: &str, own: Option<PathBuf>) -> (Option<Strin
     let found = covers::find(&state.covers.custom, id)
         .map(|p| (p, "custom"))
         .or_else(|| own.map(|p| (p, "own_files")))
-        .or_else(|| covers::find(&state.covers.downloaded, id).map(|p| (p, "downloaded")));
+        .or_else(|| covers::find(&state.covers.downloaded, id).map(|p| (p, "downloaded")))
+        .or_else(|| meta::image(&state.meta_dir, id, "cover").map(|p| (p, "api")));
     match found {
         Some((p, source)) => (data_url(&p), Some(source)),
         None => (None, None),
@@ -504,6 +508,9 @@ fn open_link(app: AppHandle, url: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     let known = catalog::games().iter().any(|g| g.links().any(|l| l == url))
         || url == community::LIST_PAGE
+        || url == meta::SGDB_KEY_PAGE
+        || url == meta::IGDB_KEY_PAGE
+        || known_igdb_page(&state, &url)
         || url
             .strip_prefix("https://github.com/")
             .map(|repo| known_community_repo(&state, repo))
@@ -682,12 +689,179 @@ struct AppSettings {
     close_to_tray: bool,
     show_hidden: bool,
     version: &'static str,
+    /// Only whether keys are saved; the keys themselves never go back to the page.
+    has_steamgriddb: bool,
+    has_igdb: bool,
+    sgdb_key_page: &'static str,
+    igdb_key_page: &'static str,
 }
 
 #[tauri::command]
 fn get_settings(app: AppHandle) -> AppSettings {
     let s = app.state::<AppState>().settings.lock().unwrap().clone();
-    AppSettings { close_to_tray: s.close_to_tray, show_hidden: s.show_hidden, version: env!("CARGO_PKG_VERSION") }
+    let keys = s.keys();
+    AppSettings {
+        close_to_tray: s.close_to_tray,
+        show_hidden: s.show_hidden,
+        version: env!("CARGO_PKG_VERSION"),
+        has_steamgriddb: !keys.sgdb.is_empty(),
+        has_igdb: keys.igdb(),
+        sgdb_key_page: meta::SGDB_KEY_PAGE,
+        igdb_key_page: meta::IGDB_KEY_PAGE,
+    }
+}
+
+#[derive(Serialize)]
+struct KeyTest {
+    ok: bool,
+    message: String,
+}
+
+/// "Salvar e testar": an empty field keeps the key already saved; `clear` forgets all of them.
+#[tauri::command]
+async fn set_api_keys(
+    app: AppHandle,
+    steamgriddb: String,
+    igdb_client_id: String,
+    igdb_client_secret: String,
+    clear: bool,
+) -> Result<Vec<KeyTest>, String> {
+    let values: Vec<String> = [steamgriddb, igdb_client_id, igdb_client_secret].iter().map(|v| v.trim().to_string()).collect();
+    if values.iter().any(|v| v.len() > 200 || v.chars().any(|c| c.is_whitespace() || c.is_control())) {
+        return Err("Uma das chaves tem espaços ou é longa demais. Copie de novo do site.".into());
+    }
+    let keys = {
+        let state = app.state::<AppState>();
+        let mut guard = state.settings.lock().unwrap();
+        let s: &mut covers::Settings = &mut guard;
+        for (field, value) in [&mut s.steamgriddb_key, &mut s.igdb_client_id, &mut s.igdb_client_secret].into_iter().zip(values) {
+            if clear {
+                field.clear();
+            }
+            if !value.is_empty() {
+                *field = value;
+            }
+        }
+        s.save(&state.settings_path)?;
+        s.keys()
+    };
+    Ok(meta::test(&keys).await.into_iter().map(|(ok, message)| KeyTest { ok, message }).collect())
+}
+
+/// What the game page shows from SteamGridDB and IGDB.
+#[derive(Serialize)]
+struct MetaView {
+    /// The player has keys for at least one site.
+    keys: bool,
+    /// Looked up at least once (found or not).
+    cached: bool,
+    found: bool,
+    term: String,
+    name: Option<String>,
+    summary: Option<String>,
+    released: Option<i64>,
+    genres: Vec<String>,
+    igdb_url: Option<String>,
+    cover_from: Option<String>,
+    banner_from: Option<String>,
+    banner: Option<String>,
+    errors: Vec<String>,
+    game: GameView,
+}
+
+fn meta_view(state: &AppState, id: &str, meta: Option<meta::Meta>, keys: bool) -> Result<MetaView, String> {
+    let game = view_any(state, id)?;
+    let m = meta.unwrap_or_default();
+    Ok(MetaView {
+        keys,
+        cached: m.fetched_at > 0,
+        found: m.found(),
+        term: m.term,
+        name: m.name,
+        summary: m.summary,
+        released: m.released,
+        genres: m.genres,
+        igdb_url: m.igdb_url,
+        cover_from: m.cover_from,
+        banner_from: m.banner_from,
+        banner: meta::image(&state.meta_dir, id, "banner").and_then(|p| data_url(&p)),
+        errors: m.errors,
+        game,
+    })
+}
+
+/// The game page asks for its information: from the cache when there is one; looked up
+/// only when there is none yet (or a miss is a week old) and the player has keys.
+/// `term` (a name the player typed) or `again` always looks it up.
+#[tauri::command]
+async fn game_meta(app: AppHandle, id: String, term: Option<String>, again: bool) -> Result<MetaView, String> {
+    let (keys, dir, title) = {
+        let state = app.state::<AppState>();
+        if !state.library.lock().unwrap().games.contains_key(&id) {
+            return Err("Adicione o jogo à biblioteca primeiro.".into());
+        }
+        let keys = state.settings.lock().unwrap().keys();
+        (keys, state.meta_dir.clone(), view_any(&state, &id)?.title)
+    };
+    let cached = meta::load(&dir, &id);
+    let term = term.map(|t| t.trim().to_string()).filter(|t| !t.is_empty() && t.len() <= 120);
+    let wanted = term.is_some() || again || meta::stale(cached.as_ref(), library::now());
+    let meta = if wanted && keys.any() {
+        let term = term.or_else(|| cached.as_ref().map(|m| m.term.clone()).filter(|t| !t.is_empty())).unwrap_or(title);
+        Some(meta::fetch(&dir, &id, &term, &keys).await)
+    } else {
+        cached
+    };
+    meta_view(&app.state::<AppState>(), &id, meta, keys.any())
+}
+
+#[derive(Serialize)]
+struct MetaAll {
+    looked_up: usize,
+    found: usize,
+    library: Vec<GameView>,
+}
+
+/// "Buscar informações da biblioteca": only games never looked up (or a week-old miss).
+#[tauri::command]
+async fn fetch_meta_all(app: AppHandle) -> Result<MetaAll, String> {
+    let (keys, dir, todo) = {
+        let state = app.state::<AppState>();
+        let keys = state.settings.lock().unwrap().keys();
+        if !keys.any() {
+            return Err("Coloque sua chave da SteamGridDB ou da IGDB em Configurações primeiro.".into());
+        }
+        let now = library::now();
+        let todo: Vec<(String, String)> = get_library(app.clone())
+            .into_iter()
+            .filter(|g| g.in_library)
+            .filter_map(|g| {
+                let cached = meta::load(&state.meta_dir, &g.id);
+                meta::stale(cached.as_ref(), now)
+                    .then(|| (g.id.clone(), cached.map(|m| m.term).filter(|t| !t.is_empty()).unwrap_or(g.title)))
+            })
+            .collect();
+        (keys, state.meta_dir.clone(), todo)
+    };
+    let mut found = 0;
+    for (id, term) in &todo {
+        if meta::fetch(&dir, id, term, &keys).await.found() {
+            found += 1;
+        }
+    }
+    Ok(MetaAll { looked_up: todo.len(), found, library: get_library(app.clone()) })
+}
+
+/// An IGDB game page saved in the cache by a lookup.
+fn known_igdb_page(state: &AppState, url: &str) -> bool {
+    url.starts_with("https://www.igdb.com/games/")
+        && state
+            .library
+            .lock()
+            .unwrap()
+            .games
+            .keys()
+            .any(|id| meta::load(&state.meta_dir, id).and_then(|m| m.igdb_url).as_deref() == Some(url))
 }
 
 #[tauri::command]
@@ -1195,6 +1369,7 @@ pub fn run() {
                 pending_root: local.join("saves-pendentes"),
                 backups_root: dir.join("Backups de saves"),
                 community_path: dir.join("community.json"),
+                meta_dir: dir.join("meta"),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
@@ -1216,6 +1391,9 @@ pub fn run() {
             install_game,
             provide_files,
             find_rom_in_downloads,
+            set_api_keys,
+            game_meta,
+            fetch_meta_all,
             play,
             stop_game,
             open_saves,

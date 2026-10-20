@@ -345,7 +345,107 @@ const COVER_SOURCE = {
   custom: 'Capa escolhida por você',
   own_files: 'Capa dos seus arquivos do jogo',
   downloaded: 'Capa baixada',
+  api: 'Capa da SteamGridDB ou da IGDB',
 };
+
+// ---- SteamGridDB / IGDB: banner and "Sobre o jogo" on the game page ----
+
+const metaCache = {};   // id -> 'loading' | MetaView | { error }
+
+async function loadMeta(id, { term = null, again = false } = {}) {
+  metaCache[id] = 'loading';
+  if (openId === id) render();
+  try {
+    const m = await invoke('game_meta', { id, term, again });
+    metaCache[id] = m;
+    const i = games.findIndex((x) => x.id === id);
+    if (i >= 0) games[i] = m.game;
+  } catch (e) {
+    metaCache[id] = { error: String(e) };
+  }
+  if (openId === id) render();
+}
+
+function metaCredits(m) {
+  const parts = [];
+  if (m.cover_from) parts.push(`capa: ${m.cover_from}`);
+  if (m.banner_from) parts.push(`banner: ${m.banner_from}`);
+  if (m.summary) parts.push('descrição: IGDB');
+  return parts.length ? `Fontes: ${parts.join(' · ')}.` : '';
+}
+
+function metaSearch(m) {
+  return `
+    <details class="meta-search">
+      <summary>Não é este jogo? Buscar com outro nome</summary>
+      <div class="tags-edit">
+        <input type="text" id="meta-term" value="${esc(m.term || '')}" maxlength="120">
+        <button data-act="meta-search">Buscar</button>
+      </div>
+    </details>`;
+}
+
+function aboutBox(g) {
+  const m = metaCache[g.id];
+  if (m === 'loading') return '<div class="box"><p class="muted">Carregando capa, banner e descrição…</p></div>';
+  if (!m) return '';
+  if (m.error) return `<p class="muted">${esc(m.error)}</p>`;
+  if (!m.cached) {
+    if (m.keys) return '';
+    return `
+      <div class="box">
+        <p class="muted">Para ver capa, banner e descrição deste jogo, coloque sua chave gratuita da SteamGridDB ou da IGDB em Configurações.</p>
+        <div class="row"><button class="ghost" data-act="open-settings">Abrir Configurações</button></div>
+      </div>`;
+  }
+  const errors = m.errors.length ? `<p class="muted">${m.errors.map(esc).join(' ')}</p>` : '';
+  if (!m.found) {
+    return `
+      <div class="box warn">
+        <h3>Não encontrei "${esc(m.term)}" na SteamGridDB nem na IGDB</h3>
+        ${errors}
+        <div class="tags-edit">
+          <input type="text" id="meta-term" value="${esc(m.term)}" maxlength="120">
+          <button data-act="meta-search">Buscar com este nome</button>
+        </div>
+      </div>`;
+  }
+  const facts = [
+    m.released ? `Lançado em ${new Date(m.released * 1000).getFullYear()}` : '',
+    m.genres.length ? m.genres.map(esc).join(', ') : '',
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="box about">
+      <h3>Sobre o jogo${m.name && m.name !== g.title ? `: ${esc(m.name)}` : ''}</h3>
+      ${facts ? `<p class="muted">${facts}</p>` : ''}
+      ${m.summary ? `<p>${esc(m.summary)}</p><p class="muted">Descrição em inglês, da IGDB.</p>` : ''}
+      <p class="muted">${esc(metaCredits(m))} Guardado no seu PC; só é buscado de novo quando você pedir.</p>
+      ${errors}
+      <div class="row">
+        ${m.igdb_url ? `<button class="link" data-act="link" data-url="${esc(m.igdb_url)}">Página na IGDB</button>` : ''}
+        <button class="ghost" data-act="meta-again">Buscar de novo</button>
+      </div>
+      ${metaSearch(m)}
+    </div>`;
+}
+
+// Banner above the page and "Sobre o jogo" under the play time, for games in the library.
+function decorateMeta(g) {
+  if (!g.in_library) return;
+  if (metaCache[g.id] === undefined) {
+    // Asked after this render, so the page is not drawn twice inside itself.
+    metaCache[g.id] = 'loading';
+    setTimeout(() => loadMeta(g.id), 0);
+  }
+  const detail = document.querySelector('#detail .detail');
+  if (!detail) return;
+  const m = metaCache[g.id];
+  if (m && m.banner) detail.insertAdjacentHTML('beforebegin', `<img class="hero" src="${m.banner}" alt="">`);
+  const right = detail.children[1];
+  const stats = right && right.querySelector('.stats');
+  if (stats) stats.insertAdjacentHTML('afterend', aboutBox(g));
+  else if (right) right.insertAdjacentHTML('beforeend', aboutBox(g));
+}
 
 function coverColumn(g) {
   if (!g.in_library) return coverHtml(g);
@@ -380,11 +480,20 @@ function renderCovers() {
           <li>A imagem que você escolheu na página do jogo.</li>
           <li>A imagem dos seus próprios arquivos do jogo (por exemplo, o ícone do dump de PS4).</li>
           <li>Uma capa baixada: primeiro das fontes do catálogo do RecompHUB, depois dos seus endereços.</li>
+          <li>Uma capa da SteamGridDB ou da IGDB, se você colocou sua chave em Configurações.</li>
           <li>Para jogos de PC sem capa, o ícone do programa.</li>
         </ol>
       </div>
-      <div class="row"><button class="primary" data-act="covers-download">Baixar capas que faltam</button></div>
+      <div class="row">
+        <button class="primary" data-act="covers-download">Baixar capas que faltam</button>
+        <button data-act="meta-all">Buscar na SteamGridDB e IGDB</button>
+      </div>
       ${report}
+      ${metaReport ? `
+        <div class="box ${metaReport.found < metaReport.looked_up ? 'warn' : 'ok'}">
+          <h3>${metaReport.looked_up ? `${metaReport.found} de ${metaReport.looked_up} jogo(s) encontrado(s)` : 'Todos os jogos já tinham sido buscados'}</h3>
+          <p class="muted">Jogos já buscados não são buscados de novo. Para um jogo não encontrado, use "Buscar com outro nome" na página dele.</p>
+        </div>` : ''}
       <div class="box">
         <h3>Seus endereços de capas (opcional)</h3>
         <p>Um endereço por linha, começando com <code>https://</code>. Use <code>\${serial}</code> para o código do jogo
@@ -401,6 +510,7 @@ function renderCovers() {
 async function openCovers() {
   openId = '__covers';
   coverReport = null;
+  metaReport = null;
   coverTemplates = await call('get_cover_templates');
   render();
 }
@@ -429,6 +539,36 @@ function manageRow(g) {
     </div>`;
 }
 
+let keyResults = null;   // last "Salvar e testar" of the SteamGridDB / IGDB keys
+let metaReport = null;   // last "Buscar na SteamGridDB e IGDB" from the covers page
+
+function keysBox() {
+  const saved = (has) => (has ? '<span class="chip ready">chave guardada</span>' : '<span class="chip">sem chave</span>');
+  const results = keyResults ? `<ul>${keyResults.map((r) =>
+    `<li class="${r.ok ? 'ok-text' : 'bad-text'}">${esc(r.message)}</li>`).join('')}</ul>` : '';
+  return `
+    <div class="box">
+      <h3>Capa, banner e descrição dos jogos</h3>
+      <p>Com uma chave gratuita sua, o RecompHUB busca na <b>SteamGridDB</b> (capas e banners feitos pela comunidade)
+        e na <b>IGDB</b> (descrição, ano, gêneros, capa e arte) as informações dos jogos da sua biblioteca.
+        Cada jogo é buscado uma vez e fica guardado no seu PC.</p>
+      <p><b>SteamGridDB</b> ${saved(settings.has_steamgriddb)}
+        <button class="link" data-act="link" data-url="${esc(settings.sgdb_key_page)}">pegar minha chave</button></p>
+      <input type="password" id="key-sgdb" class="wide" autocomplete="off" placeholder="${settings.has_steamgriddb ? 'Deixe vazio para manter a chave guardada' : 'Chave de API da SteamGridDB'}">
+      <p><b>IGDB</b> ${saved(settings.has_igdb)}
+        <button class="link" data-act="link" data-url="${esc(settings.igdb_key_page)}">como criar (aplicativo na Twitch)</button></p>
+      <input type="text" id="key-igdb-id" class="wide" autocomplete="off" placeholder="${settings.has_igdb ? 'Client ID (vazio mantém o guardado)' : 'Client ID'}">
+      <input type="password" id="key-igdb-secret" class="wide" autocomplete="off" placeholder="${settings.has_igdb ? 'Client Secret (vazio mantém o guardado)' : 'Client Secret'}">
+      <div class="row">
+        <button data-act="keys-save">Salvar e testar</button>
+        ${settings.has_steamgriddb || settings.has_igdb ? '<button class="ghost danger" data-act="keys-clear">Apagar as chaves</button>' : ''}
+      </div>
+      ${results}
+      <p class="muted">As chaves ficam só neste PC (no arquivo de configurações do RecompHUB) e só são enviadas para os próprios sites.
+        Basta uma das duas; com as duas, a capa e o banner vêm primeiro da SteamGridDB e a descrição da IGDB.</p>
+    </div>`;
+}
+
 function renderSettings() {
   $('#detail').innerHTML = `
     <button class="ghost back" data-act="back">← Biblioteca</button>
@@ -442,6 +582,7 @@ function renderSettings() {
           Mostrar jogos ocultos na biblioteca.</label>
         <div class="row"><button data-act="settings-save">Salvar</button></div>
       </div>
+      ${keysBox()}
       <p class="muted">RecompHUB versão ${esc(settings.version)}.</p>
     </div>`;
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
@@ -461,6 +602,7 @@ function renderDetail() {
   if (g.kind === 'pc_game') renderPcDetail(g);
   else if (g.kind === 'community') renderCommunityDetail(g);
   else renderPortDetail(g);
+  decorateMeta(g);
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
     el.addEventListener('click', () => act(el.dataset.act, g, el)));
 }
@@ -744,6 +886,54 @@ async function act(action, g, el) {
       });
       setGame(await call('set_launch_options', { id: g.id, args: $('#launch-args').value, env }));
       toast('Opções de inicialização salvas.');
+      break;
+    }
+    case 'open-settings':
+      $('#btn-settings').click();
+      break;
+    case 'meta-again':
+      await loadMeta(g.id, { again: true });
+      break;
+    case 'meta-search': {
+      const term = $('#meta-term').value.trim();
+      if (!term) break;
+      await loadMeta(g.id, { term });
+      break;
+    }
+    case 'keys-save':
+    case 'keys-clear': {
+      const clear = action === 'keys-clear';
+      if (clear && !confirm('Apagar as chaves da SteamGridDB e da IGDB deste PC? As capas e descrições já guardadas continuam.')) break;
+      el.disabled = true;
+      try {
+        keyResults = await invoke('set_api_keys', {
+          steamgriddb: clear ? '' : $('#key-sgdb').value,
+          igdbClientId: clear ? '' : $('#key-igdb-id').value,
+          igdbClientSecret: clear ? '' : $('#key-igdb-secret').value,
+          clear,
+        });
+        if (clear) keyResults = [{ ok: true, message: 'Chaves apagadas.' }];
+        settings = await call('get_settings');
+        // Games looked up before keys existed are asked again on their page.
+        for (const id of Object.keys(metaCache)) if (!metaCache[id].cached) delete metaCache[id];
+      } catch (e) {
+        keyResults = [{ ok: false, message: String(e) }];
+      }
+      render();
+      break;
+    }
+    case 'meta-all': {
+      el.disabled = true;
+      el.textContent = 'Buscando…';
+      try {
+        const r = await invoke('fetch_meta_all');
+        games = r.library;
+        metaReport = r;
+        for (const id of Object.keys(metaCache)) delete metaCache[id];
+      } catch (e) {
+        toast(String(e), true);
+      }
+      render();
       break;
     }
     case 'settings-save':
@@ -1250,6 +1440,7 @@ document.addEventListener('keydown', (e) => {
 $('#btn-tv').addEventListener('click', tvOpen);
 $('#btn-settings').addEventListener('click', async () => {
   settings = await call('get_settings');
+  keyResults = null;
   openId = '__settings';
   render();
 });

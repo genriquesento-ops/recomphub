@@ -88,5 +88,17 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa
     baixada (fontes curadas do catálogo, depois modelos do jogador com `${serial}`/`${title}`)
-    → ícone do programa (jogos de PC). Imagens só são guardadas se os primeiros bytes forem de
-    PNG, JPG ou WEBP, até 10 MB.
+    → capa da SteamGridDB ou da IGDB (decisão 21) → ícone do programa (jogos de PC). Imagens só
+    são guardadas se os primeiros bytes forem de PNG, JPG ou WEBP, até 10 MB.
+21. **SteamGridDB e IGDB com a chave do próprio jogador.** As duas exigem chave (a IGDB, um
+    Client ID e um Client Secret de um aplicativo da Twitch), e um segredo embutido no
+    instalador deixaria de ser segredo. As chaves ficam no `settings.json` deste PC, nunca
+    voltam para a página e só vão para os próprios sites (o segredo da IGDB no corpo do pedido,
+    não no endereço). Sem chave, nada muda.
+22. **Cada jogo é buscado uma vez.** O resultado fica em `meta/<id>.json` e as imagens em
+    `meta/<id>/`. Um jogo encontrado só é buscado de novo quando o jogador pede ("Buscar de
+    novo" ou "Buscar com outro nome"); um jogo não encontrado é tentado de novo depois de uma
+    semana. O token da Twitch é reaproveitado até vencer. Só imagens dos servidores das duas
+    (`*.steamgriddb.com`, `images.igdb.com`) são baixadas. Com as duas chaves, capa e banner
+    vêm primeiro da SteamGridDB; descrição, ano e gêneros, da IGDB (em inglês). As fontes
+    aparecem na página do jogo.
