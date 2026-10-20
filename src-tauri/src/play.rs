@@ -197,6 +197,7 @@ fn tick(app: &AppHandle, sys: &System) {
     remember(app, &started, records);
     for (id, _) in &ended {
         crate::backup_after_session(app.clone(), id.clone());
+        crate::check_achievements(app, id, true);
     }
     watch_saves(app, &check_saves);
     if !started.is_empty() || !ended.is_empty() {
@@ -229,6 +230,7 @@ fn watch_saves(app: &AppHandle, ids: &[String]) {
         };
         if changed {
             let _ = app.emit("save-changed", serde_json::json!({ "id": id, "at": newest }));
+            crate::check_achievements(app, id, true);
         }
     }
 }

@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "revision": 1,
+  "generic": [
+    { "id": "primeira-sessao", "title": "Primeiros passos", "description": "Jogue uma sessão pelo RecompHUB.", "points": 5, "type": "progression", "badge": "👣", "trigger": { "stat": "play_count", "at_least": 1 } },
+    { "id": "uma-hora", "title": "Uma hora de aventura", "description": "Jogue por 1 hora no total.", "points": 10, "type": "progression", "badge": "⏱️", "trigger": { "stat": "play_seconds", "at_least": 3600 } },
+    { "id": "dez-horas", "title": "Dedicação", "description": "Jogue por 10 horas no total.", "points": 25, "type": "progression", "badge": "🔥", "trigger": { "stat": "play_seconds", "at_least": 36000 } },
+    { "id": "cinquenta-horas", "title": "Veterano", "description": "Jogue por 50 horas no total.", "points": 50, "type": "progression", "badge": "🏅", "trigger": { "stat": "play_seconds", "at_least": 180000 } },
+    { "id": "maratona", "title": "Maratona", "description": "Jogue 3 horas seguidas numa sessão.", "points": 25, "type": "progression", "badge": "🏃", "trigger": { "stat": "longest_session", "at_least": 10800 } },
+    { "id": "frequentador", "title": "Frequentador", "description": "Jogue em 7 dias diferentes.", "points": 15, "type": "progression", "badge": "📅", "trigger": { "stat": "days_played", "at_least": 7 } }
+  ],
+  "games": {
+    "banjo": {
+      "reader": "bk_eeprom",
+      "source": "Estruturas do save conferidas na decompilação n64decomp/banjo-kazooie (CC0): include/save.h e src/core2/code_B5040.c.",
+      "achievements": [
+        { "id": "jiggy-1", "title": "Primeira peça", "description": "Pegue o primeiro Jiggy.", "points": 5, "type": "progression", "badge": "🧩", "trigger": { "stat": "jiggies", "at_least": 1 } },
+        { "id": "jiggy-10", "title": "Montando o quebra-cabeça", "description": "Pegue 10 Jiggies.", "points": 10, "type": "progression", "badge": "🧩", "trigger": { "stat": "jiggies", "at_least": 10 } },
+        { "id": "jiggy-50", "title": "Metade do caminho", "description": "Pegue 50 Jiggies.", "points": 25, "type": "progression", "badge": "🧩", "trigger": { "stat": "jiggies", "at_least": 50 } },
+        { "id": "jiggy-100", "title": "Quebra-cabeça completo", "description": "Pegue os 100 Jiggies.", "points": 50, "type": "progression", "badge": "🏆", "trigger": { "stat": "jiggies", "at_least": 100 } },
+        { "id": "notas-100", "title": "Afinando", "description": "Some 100 notas nos recordes das fases.", "points": 10, "type": "progression", "badge": "🎵", "trigger": { "stat": "notes", "at_least": 100 } },
+        { "id": "notas-500", "title": "Melodia", "description": "Some 500 notas nos recordes das fases.", "points": 25, "type": "progression", "badge": "🎶", "trigger": { "stat": "notes", "at_least": 500 } },
+        { "id": "notas-900", "title": "Ouvido absoluto", "description": "Todas as 900 notas nos recordes das fases.", "points": 50, "type": "progression", "badge": "🎼", "trigger": { "stat": "notes", "at_least": 900 } },
+        { "id": "favos-6", "title": "Mais energia", "description": "Junte 6 favos de mel vazios.", "points": 10, "type": "progression", "badge": "🍯", "trigger": { "stat": "honeycombs", "at_least": 6 } },
+        { "id": "favos-24", "title": "Colmeia cheia", "description": "Junte os 24 favos de mel vazios.", "points": 25, "type": "progression", "badge": "🐝", "trigger": { "stat": "honeycombs", "at_least": 24 } },
+        { "id": "mumbo-50", "title": "Freguês do Mumbo", "description": "Pegue 50 Mumbo Tokens.", "points": 15, "type": "progression", "badge": "💀", "trigger": { "stat": "mumbo_tokens", "at_least": 50 } },
+        { "id": "mumbo-116", "title": "Colecionador de caveiras", "description": "Pegue os 116 Mumbo Tokens.", "points": 30, "type": "progression", "badge": "☠️", "hidden": true, "trigger": { "stat": "mumbo_tokens", "at_least": 116 } }
+      ]
+    }
+  }
+}

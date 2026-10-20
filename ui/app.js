@@ -634,7 +634,7 @@ function renderProfileChip() {
 
 // Everything cached on screen belongs to the previous profile.
 function forgetProfileCaches() {
-  for (const c of [historyCache, backupCache]) for (const id of Object.keys(c)) delete c[id];
+  for (const c of [historyCache, backupCache, achCache]) for (const id of Object.keys(c)) delete c[id];
   statsData = null;
 }
 
@@ -778,14 +778,109 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'Enter') { whoPick(whoSel); e.preventDefault(); }
 });
 
+// ---- Conquistas ----
+
+const achCache = {};   // id -> 'loading' | GameAchievements
+let achSettings = null;
+let achSummary = null;
+
+function achItem(a) {
+  const locked = !a.unlocked_at;
+  const secret = locked && a.hidden;
+  const pct = a.goal ? Math.round((a.value / a.goal) * 100) : 0;
+  return `
+    <li class="ach${locked ? ' locked' : ''}">
+      <span class="ach-badge">${secret ? '❔' : esc(a.badge || '🏆')}</span>
+      <span class="ach-text">
+        <b>${secret ? 'Conquista secreta' : esc(a.title)}</b>
+        <span class="muted">${secret ? 'Continue jogando para descobrir.' : esc(a.description)}</span>
+        ${locked && !secret && a.goal > 1 ? `<span class="ach-bar"><span style="width:${pct}%"></span></span>` : ''}
+        ${a.unlocked_at ? `<span class="muted small-text">Desbloqueada em ${sessionDate(a.unlocked_at)}</span>` : ''}
+      </span>
+      <span class="ach-pts">${a.points}</span>
+    </li>`;
+}
+
+function achievementsBoxHtml(g) {
+  const c = achCache[g.id];
+  if (!c || c === 'loading') return '<div class="box"><h3>Conquistas</h3><p class="muted">Carregando…</p></div>';
+  const own = c.list.filter((a) => a.id && c.source && !['primeira-sessao', 'uma-hora', 'dez-horas', 'cinquenta-horas', 'maratona', 'frequentador'].includes(a.id));
+  return `
+    <details class="box ach-box" ${c.unlocked ? 'open' : ''}>
+      <summary><h3>Conquistas: ${c.unlocked} de ${c.total} · ${c.points} de ${c.total_points} pontos</h3></summary>
+      <div class="progress"><div style="width:${c.total ? Math.round((c.unlocked / c.total) * 100) : 0}%"></div></div>
+      <ul class="achs">${c.list.map(achItem).join('')}</ul>
+      <p class="muted">Conquistas do RecompHUB, do perfil ${esc(profiles ? profiles.active.name : '')}: tempo de jogo e sessões
+        ${c.source ? `, além do progresso lido do seu save (só leitura; o save nunca é alterado). ${c.save_read ? '' : '<b>O save deste jogo ainda não foi encontrado.</b>'}` : '.'}
+        Não são conquistas do RetroAchievements.</p>
+      ${own.length && c.source ? `<p class="muted small-text">${esc(c.source)}</p>` : ''}
+    </details>`;
+}
+
+function decorateAchievements(g) {
+  if (!g.in_library) return;
+  if (achCache[g.id] === undefined) {
+    achCache[g.id] = 'loading';
+    setTimeout(async () => {
+      try {
+        achCache[g.id] = await invoke('get_achievements', { id: g.id });
+      } catch {
+        delete achCache[g.id];
+        return;
+      }
+      if (openId === g.id) render();
+    }, 0);
+  }
+  const right = document.querySelector('#detail .detail > div:nth-child(2)');
+  const progress = right && right.querySelector('.progress-box');
+  if (progress) progress.insertAdjacentHTML('beforebegin', achievementsBoxHtml(g));
+  else if (right) right.insertAdjacentHTML('beforeend', achievementsBoxHtml(g));
+}
+
+function achievementSettingsBox() {
+  const a = achSettings;
+  if (!a) return '';
+  return `
+    <div class="box">
+      <h3>Conquistas</h3>
+      <label class="check"><input type="checkbox" id="set-ach-overlay" ${a.overlay ? 'checked' : ''}>
+        Mostrar "Conquista desbloqueada" num canto da tela, por cima do jogo.</label>
+      <label class="check"><input type="checkbox" id="set-ach-sound" ${a.sound ? 'checked' : ''}>
+        Tocar um som junto com o aviso.</label>
+      <div class="row">
+        <button data-act="ach-settings-save">Salvar</button>
+        <button class="ghost" data-act="ach-test">Testar aviso</button>
+      </div>
+      <p class="muted">O aviso aparece por cima de jogos em janela ou em "tela cheia sem bordas" (borderless). Em tela cheia
+        exclusiva o Windows não deixa nenhuma janela aparecer por cima; a conquista fica registrada do mesmo jeito.</p>
+    </div>`;
+}
+
+function achievementsSummaryHtml() {
+  const a = achSummary;
+  if (!a) return '<div class="box"><h3>Conquistas</h3><p class="muted">Carregando…</p></div>';
+  return `
+    <div class="box">
+      <h3>Conquistas: ${a.unlocked} de ${a.total} · ${a.points} pontos</h3>
+      ${a.recent.length ? `<p><b>Mais recentes</b></p><ul class="achs">${a.recent.map((x) => achItem(x).replace('<b>', `<b>${esc((games.find((g) => g.id === x.game) || {}).title || x.game)}: `)).join('')}</ul>` : '<p class="muted">Nenhuma conquista ainda. Jogue algo!</p>'}
+      <ul class="top">${a.games.map(([id, title, done, total]) => `
+        <li><span class="name">${esc(title)}</span>
+          <span class="track"><span style="width:${total ? Math.round((done / total) * 100) : 0}%"></span></span>
+          <span class="muted">${done} de ${total}</span></li>`).join('')}</ul>
+    </div>`;
+}
+
 let statsData = null;
 
 async function openStats() {
   openId = '__stats';
   statsData = null;
+  achSummary = null;
   render();
   // getTimezoneOffset is minutes WEST of UTC; the backend wants east.
   statsData = await call('get_stats', { offsetMinutes: -new Date().getTimezoneOffset() });
+  if (openId === '__stats') render();
+  achSummary = await call('get_achievement_summary');
   if (openId === '__stats') render();
 }
 
@@ -836,7 +931,8 @@ function renderStats() {
           `<span class="tag">${label}: ${s.completion[k]}</span>`).join('') || '<span class="muted">Biblioteca vazia.</span>'}</div>
       </div>
       <p class="muted">As estatísticas por dia e semana vêm do histórico de sessões, que começou na versão 0.12.
-        O tempo total inclui o que foi jogado antes.</p>`;
+        O tempo total inclui o que foi jogado antes.</p>
+      ${achievementsSummaryHtml()}`;
   }
   $('#detail').innerHTML = `
     <button class="ghost back" data-act="back">← Biblioteca</button>
@@ -1030,6 +1126,7 @@ function renderSettings() {
           Mostrar jogos ocultos na biblioteca.</label>
         <div class="row"><button data-act="settings-save">Salvar</button></div>
       </div>
+      ${achievementSettingsBox()}
       ${backupSettingsBox()}
       ${keysBox()}
       <p class="muted">RecompHUB versão ${esc(settings.version)}.</p>
@@ -1056,6 +1153,7 @@ function renderDetail() {
   decorateMeta(g);
   decorateProgress(g);
   decorateBackups(g);
+  decorateAchievements(g);
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
     el.addEventListener('click', () => act(el.dataset.act, g, el)));
 }
@@ -1517,6 +1615,16 @@ async function act(action, g, el) {
       if (updated) { profiles = updated; render(); }
       break;
     }
+    case 'ach-settings-save':
+      achSettings = await call('set_achievement_settings', {
+        overlay: $('#set-ach-overlay').checked,
+        sound: $('#set-ach-sound').checked,
+      });
+      toast('Configurações de conquistas salvas.');
+      break;
+    case 'ach-test':
+      await call('test_achievement_notice');
+      break;
     case 'settings-save':
       settings = await call('set_settings', {
         closeToTray: $('#set-tray').checked,
@@ -1633,6 +1741,13 @@ listen('session', async (e) => {
 });
 
 listen('open-game', (e) => openGame(e.payload));
+listen('achievement', (e) => {
+  const { id, game, unlocked, complete } = e.payload;
+  for (const a of unlocked) toast(`🏆 Conquista: ${a.title} (${game}, ${a.points} pts)`);
+  if (complete) toast(`💯 Todas as conquistas de ${game}!`);
+  delete achCache[id];
+  if (openId === id) render();
+});
 listen('backup', (e) => {
   const { id, result, message } = e.payload;
   toast(message, result === 'error');
@@ -2037,6 +2152,7 @@ $('#btn-settings').addEventListener('click', async () => {
   settings = await call('get_settings');
   keyResults = null;
   backupSettings = await call('get_backup_settings');
+  achSettings = await call('get_achievement_settings');
   openId = '__settings';
   render();
 });

@@ -301,3 +301,17 @@ button.small { font-size: 12px; padding: 5px 10px; }
 }
 .who-item .avatar.big { width: 84px; height: 84px; font-size: 36px; }
 .who-item.sel, .who-item:hover { border-color: var(--accent); transform: scale(1.05); }
+
+.ach-box summary { cursor: pointer; }
+.ach-box .progress { margin: 10px 0; }
+.achs { list-style: none; padding: 0; margin: 8px 0; }
+.ach { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.ach-badge { flex: none; width: 42px; height: 42px; border-radius: 10px; background: var(--panel-2); display: flex; align-items: center; justify-content: center; font-size: 22px; }
+.ach.locked .ach-badge { filter: grayscale(1); opacity: .45; }
+.ach-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ach.locked .ach-text b { color: var(--muted); }
+.ach-pts { color: var(--accent); font-weight: 700; }
+.ach.locked .ach-pts { color: var(--muted); }
+.ach-bar { display: block; height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 4px; max-width: 240px; }
+.ach-bar span { display: block; height: 100%; background: var(--accent); }
+.small-text { font-size: 12px; }

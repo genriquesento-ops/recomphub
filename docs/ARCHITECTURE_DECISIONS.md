@@ -129,6 +129,26 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     `profiles/saves/<perfil>/<jogo>/` e o do outro perfil volta. A pasta em si fica no lugar,
     para o port continuar achando. Ao ligar, os saves atuais ficam com o perfil em uso.
 
+## Conquistas
+
+32. **Conquistas próprias, nunca do RetroAchievements.** Os ports não avisam conquistas, e o
+    RetroAchievements só aceita desbloqueios dos emuladores aprovados por ele; ler a memória do
+    jogo para isso iria contra as regras deles. As conquistas do RecompHUB têm o formato das do
+    RetroAchievements (título, descrição, pontos, tipo, ícone, oculta) e ficam em
+    `achievements.json`, conferido como o catálogo (ids, pontos de 1 a 100, contadores conhecidos).
+33. **Gatilhos só com o que o RecompHUB já lê.** Gerais (todo jogo): sessões, tempo total, maior
+    sessão e dias jogados, do perfil em uso. Por jogo: o progresso lido do save, só leitura, com o
+    formato tirado da decompilação pública do jogo (Banjo-Kazooie: `n64decomp/banjo-kazooie`, CC0;
+    vale o melhor dos três saves). Um jogo novo ganha leitor só com o formato conferido e testado.
+34. **Conferidas ao fechar o jogo e quando o save muda.** O vigia de saves (decisão 27) e o fim da
+    sessão disparam a conferência; abrir a página do jogo também, sem aviso por cima. Os
+    desbloqueios ficam em `achievements/<perfil>.json`.
+35. **Aviso por cima do jogo, como o Steam Achievement Notifier.** Uma janela pequena, sem bordas,
+    transparente, sempre no topo, que não rouba o foco e deixa os cliques passarem; some sozinha.
+    O som é gerado na hora (Web Audio), sem arquivo de terceiros. Só aparece sobre jogos em janela
+    ou tela cheia sem bordas; em tela cheia exclusiva a conquista fica registrada sem aviso. O
+    Steam Achievement Notifier não tem licença: dele vieram só ideias, nenhum código.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

@@ -49,6 +49,11 @@ pub struct Settings {
     /// Ask Ludusavi to back up "Outros jogos de PC" when they close.
     #[serde(default)]
     pub ludusavi_auto: bool,
+    /// "Conquista desbloqueada" in a small window over the game.
+    #[serde(default = "yes")]
+    pub achievement_overlay: bool,
+    #[serde(default = "yes")]
+    pub achievement_sound: bool,
 }
 
 fn ten() -> u32 {
@@ -72,6 +77,8 @@ impl Default for Settings {
             backup_keep: 10,
             ludusavi_path: String::new(),
             ludusavi_auto: false,
+            achievement_overlay: true,
+            achievement_sound: true,
         }
     }
 }

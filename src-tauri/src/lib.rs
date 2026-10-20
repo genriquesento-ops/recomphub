@@ -1,3 +1,4 @@
+mod achievements;
 mod autosave;
 mod catalog;
 mod catalog_sync;
@@ -18,7 +19,7 @@ mod tray;
 
 use base64::Engine;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
@@ -60,6 +61,10 @@ pub struct AppState {
     pub profiles: Mutex<profiles::Profiles>,
     pub profiles_path: PathBuf,
     pub profiles_dir: PathBuf,
+    /// Unlocked achievements, one file per profile.
+    pub achievements_dir: PathBuf,
+    /// Notices waiting for the window over the game.
+    pub overlay_queue: Mutex<VecDeque<Notice>>,
 }
 
 /// Everything the interface shows about one game.
@@ -1563,6 +1568,256 @@ async fn ludusavi_backup(app: AppHandle, id: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+// ---- Conquistas ----
+
+/// The numbers a game's achievements can use: play time and sessions of the active profile,
+/// and what the game's save says (when RecompHUB knows how to read it).
+fn game_stats(state: &AppState, id: &str) -> BTreeMap<String, u64> {
+    let mut stats = BTreeMap::new();
+    let Some(entry) = state.library.lock().unwrap().games.get(id).cloned() else { return stats };
+    let profile = state.profiles.lock().unwrap().active.clone();
+    stats.insert("play_seconds".to_string(), entry.total_seconds);
+    stats.insert("play_count".to_string(), entry.play_count as u64);
+    {
+        let h = state.history.lock().unwrap();
+        let sessions = h.of(id, &profile, usize::MAX);
+        stats.insert("longest_session".to_string(), sessions.iter().map(|r| r.seconds).max().unwrap_or(0));
+        let days: HashSet<u64> = sessions.iter().map(|r| r.start / 86_400).collect();
+        stats.insert("days_played".to_string(), days.len() as u64);
+    }
+    if let (Some(game), Some(set)) = (catalog::get(id), achievements::builtin().games.get(id)) {
+        if let Some(path) = files::n64_save_file(game, Path::new(&entry.install_dir)) {
+            stats.extend(achievements::read_save(&set.reader, &path));
+        }
+    }
+    stats
+}
+
+/// What the small window over the game shows.
+#[derive(Serialize, Clone)]
+pub struct Notice {
+    /// "main", "complete" (every achievement of the game) or "test".
+    kind: &'static str,
+    game: String,
+    title: String,
+    description: String,
+    badge: String,
+    points: u32,
+    sound: bool,
+}
+
+/// Shows notices in the window over the game, opening it if needed. It closes by itself.
+fn show_overlay(app: &AppHandle, notices: Vec<Notice>) {
+    if notices.is_empty() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    state.overlay_queue.lock().unwrap().extend(notices);
+    if app.get_webview_window("conquista").is_some() {
+        return;
+    }
+    let (w, h) = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let s = m.size().to_logical::<f64>(m.scale_factor());
+            (s.width, s.height)
+        })
+        .unwrap_or((1280.0, 720.0));
+    let built = tauri::WebviewWindowBuilder::new(app, "conquista", tauri::WebviewUrl::App("overlay.html".into()))
+        .title("Conquista")
+        .inner_size(420.0, 140.0)
+        .position(w - 440.0, h - 200.0)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        // Same as the main window (tauri.conf.json): WebView2 needs the same arguments for both.
+        .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required")
+        .build();
+    if let Ok(window) = built {
+        // Clicks go through to the game.
+        let _ = window.set_ignore_cursor_events(true);
+    }
+}
+
+#[tauri::command]
+fn take_overlay_notice(app: AppHandle) -> Option<Notice> {
+    app.state::<AppState>().overlay_queue.lock().unwrap().pop_front()
+}
+
+#[derive(Serialize, Clone)]
+struct AchievementEvent {
+    id: String,
+    game: String,
+    unlocked: Vec<achievements::View>,
+    complete: bool,
+}
+
+/// Checks a game's achievements for the active profile; new unlocks go to the page and,
+/// when `overlay`, to the window over the game.
+pub(crate) fn check_achievements(app: &AppHandle, id: &str, overlay: bool) -> Vec<achievements::View> {
+    let state = app.state::<AppState>();
+    let stats = game_stats(&state, id);
+    let profile = state.profiles.lock().unwrap().active.clone();
+    let mut unlocks = achievements::Unlocks::load(&state.achievements_dir, &profile);
+    let (all, new) = achievements::evaluate(achievements::builtin(), id, &stats, &mut unlocks, library::now());
+    if new.is_empty() {
+        return all;
+    }
+    let _ = unlocks.save(&state.achievements_dir, &profile);
+    let title = view_any(&state, id).map(|g| g.title).unwrap_or_else(|_| id.to_string());
+    let complete = all.iter().all(|a| a.unlocked_at.is_some());
+    let _ = app.emit("achievement", AchievementEvent { id: id.to_string(), game: title.clone(), unlocked: new.clone(), complete });
+    let settings = state.settings.lock().unwrap().clone();
+    if overlay && settings.achievement_overlay {
+        let mut notices: Vec<Notice> = new
+            .iter()
+            .map(|a| Notice {
+                kind: "main",
+                game: title.clone(),
+                title: a.title.clone(),
+                description: a.description.clone(),
+                badge: a.badge.clone(),
+                points: a.points,
+                sound: settings.achievement_sound,
+            })
+            .collect();
+        if complete {
+            notices.push(Notice {
+                kind: "complete",
+                game: title.clone(),
+                title: "100% das conquistas!".into(),
+                description: format!("Você desbloqueou todas as conquistas de {title}."),
+                badge: "💯".into(),
+                points: all.iter().map(|a| a.points).sum(),
+                sound: settings.achievement_sound,
+            });
+        }
+        show_overlay(app, notices);
+    }
+    all
+}
+
+#[derive(Serialize)]
+struct GameAchievements {
+    list: Vec<achievements::View>,
+    unlocked: usize,
+    total: usize,
+    points: u32,
+    total_points: u32,
+    /// Where the save layout came from, for game-specific achievements.
+    source: Option<String>,
+    /// The game's save could be read (game-specific achievements can move).
+    save_read: bool,
+}
+
+#[tauri::command]
+async fn get_achievements(app: AppHandle, id: String) -> Result<GameAchievements, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        if !state.library.lock().unwrap().games.contains_key(&id) {
+            return Err("Adicione o jogo à biblioteca primeiro.".to_string());
+        }
+        let list = check_achievements(&app, &id, false);
+        let set = achievements::builtin().games.get(&id);
+        let save_read = set.is_some() && game_stats(&state, &id).keys().any(|k| !achievements::GENERIC_STATS.contains(&k.as_str()));
+        Ok(GameAchievements {
+            unlocked: list.iter().filter(|a| a.unlocked_at.is_some()).count(),
+            total: list.len(),
+            points: list.iter().filter(|a| a.unlocked_at.is_some()).map(|a| a.points).sum(),
+            total_points: list.iter().map(|a| a.points).sum(),
+            source: set.map(|s| s.source.clone()),
+            save_read,
+            list,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct AchievementSummary {
+    games: Vec<(String, String, usize, usize)>,
+    unlocked: usize,
+    total: usize,
+    points: u32,
+    recent: Vec<achievements::View>,
+}
+
+/// For the Estatísticas page: every game in the library, for the active profile.
+#[tauri::command]
+async fn get_achievement_summary(app: AppHandle) -> Result<AchievementSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let library: Vec<GameView> = get_library(app.clone()).into_iter().filter(|g| g.in_library).collect();
+        let mut out = AchievementSummary { games: vec![], unlocked: 0, total: 0, points: 0, recent: vec![] };
+        for g in library {
+            let list = check_achievements(&app, &g.id, false);
+            let done = list.iter().filter(|a| a.unlocked_at.is_some()).count();
+            let total = list.len();
+            out.unlocked += done;
+            out.total += list.len();
+            out.points += list.iter().filter(|a| a.unlocked_at.is_some()).map(|a| a.points).sum::<u32>();
+            out.recent.extend(list.into_iter().filter(|a| a.unlocked_at.is_some()));
+            out.games.push((g.id, g.title, done, total));
+        }
+        out.recent.sort_by(|a, b| b.unlocked_at.cmp(&a.unlocked_at));
+        out.recent.truncate(8);
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct AchievementSettings {
+    overlay: bool,
+    sound: bool,
+}
+
+#[tauri::command]
+fn get_achievement_settings(app: AppHandle) -> AchievementSettings {
+    let s = app.state::<AppState>().settings.lock().unwrap().clone();
+    AchievementSettings { overlay: s.achievement_overlay, sound: s.achievement_sound }
+}
+
+#[tauri::command]
+fn set_achievement_settings(app: AppHandle, overlay: bool, sound: bool) -> Result<AchievementSettings, String> {
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.settings.lock().unwrap();
+        s.achievement_overlay = overlay;
+        s.achievement_sound = sound;
+        s.save(&state.settings_path)?;
+    }
+    Ok(get_achievement_settings(app))
+}
+
+/// "Testar aviso", as Steam Achievement Notifier's test notification.
+#[tauri::command]
+fn test_achievement_notice(app: AppHandle) {
+    let sound = app.state::<AppState>().settings.lock().unwrap().achievement_sound;
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        show_overlay(
+            &app2,
+            vec![Notice {
+                kind: "test",
+                game: "RecompHUB".into(),
+                title: "Aviso de teste".into(),
+                description: "É assim que as conquistas aparecem por cima do jogo.".into(),
+                badge: "🏆".into(),
+                points: 10,
+                sound,
+            }],
+        )
+    });
+}
+
 // ---- Perfis ----
 
 #[derive(Serialize)]
@@ -1958,6 +2213,8 @@ pub fn run() {
                 profiles: Mutex::new(profiles::Profiles::load(&dir.join("profiles.json"))),
                 profiles_path: dir.join("profiles.json"),
                 profiles_dir: dir.join("profiles"),
+                achievements_dir: dir.join("achievements"),
+                overlay_queue: Mutex::new(VecDeque::new()),
                 library: Mutex::new(Library::load(&library_path)),
                 library_path,
                 latest: Mutex::new(HashMap::new()),
@@ -2003,6 +2260,12 @@ pub fn run() {
             set_profile_options,
             switch_profile,
             set_separate_saves,
+            take_overlay_notice,
+            get_achievements,
+            get_achievement_summary,
+            get_achievement_settings,
+            set_achievement_settings,
+            test_achievement_notice,
             play,
             stop_game,
             open_saves,
