@@ -111,6 +111,7 @@ struct GameView {
     hidden: bool,
     launch_args: String,
     env: Vec<library::EnvVar>,
+    run_as_admin: bool,
     /// library::Completion as text ("none", "playing", "beaten"…).
     completion: library::Completion,
     play_count: u32,
@@ -233,6 +234,7 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         hidden: entry.as_ref().map(|e| e.hidden).unwrap_or(false),
         launch_args: entry.as_ref().map(|e| e.launch_args.clone()).unwrap_or_default(),
         env: entry.as_ref().map(|e| e.env.clone()).unwrap_or_default(),
+        run_as_admin: entry.as_ref().map(|e| e.run_as_admin).unwrap_or(false),
         completion: entry.as_ref().map(|e| e.completion).unwrap_or_default(),
         play_count: entry.as_ref().map(|e| e.play_count).unwrap_or(0),
         notes: entry.as_ref().map(|e| e.notes.clone()).unwrap_or_default(),
@@ -305,6 +307,7 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         hidden: entry.hidden,
         launch_args: entry.launch_args.clone(),
         env: entry.env.clone(),
+        run_as_admin: entry.run_as_admin,
         completion: entry.completion,
         play_count: entry.play_count,
         notes: entry.notes.clone(),
@@ -2240,17 +2243,38 @@ fn play(app: AppHandle, id: String) -> Result<(), String> {
     }
     let entry = state.library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
     let dir = PathBuf::from(&entry.install_dir);
-    let exe = match catalog::get(&id) {
-        Some(game) => game.exe.to_string(),
-        None => entry.exe.clone().ok_or("Jogo sem programa definido.")?,
-    };
-    play::start(&app, &id, &dir, &exe, &entry.launch_args, &entry.env)
+    let exe = program_of(&id, &entry).ok_or("Jogo sem programa definido.")?;
+    let started = play::start(&app, &id, &dir, &exe, &entry.launch_args, &entry.env, entry.run_as_admin)?;
+    if started == play::Started::Admin && !entry.run_as_admin {
+        // Next time straight to the prompt, and the page says why.
+        if let Some(e) = state.library.lock().unwrap().games.get_mut(&id) {
+            e.run_as_admin = true;
+        }
+        save(&state)?;
+        let _ = app.emit("notify", "Este jogo pede permissão de administrador. Daqui em diante o RecompHUB já abre pedindo a permissão do Windows.");
+    }
+    Ok(())
+}
+
+/// The game's program inside its folder: the catalog's for ports, the chosen one otherwise.
+pub(crate) fn program_of(id: &str, entry: &library::Entry) -> Option<String> {
+    match catalog::get(id) {
+        Some(game) => Some(game.exe.to_string()),
+        None => entry.exe.clone(),
+    }
 }
 
 #[tauri::command]
 fn stop_game(app: AppHandle, id: String) -> Result<(), String> {
-    let dir = app.state::<AppState>().library.lock().unwrap().install_dir(&id).ok_or("Jogo fora da biblioteca.")?;
-    play::stop(&dir).map(|_| ())
+    let entry = app.state::<AppState>().library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
+    let name = program_of(&id, &entry).and_then(|x| play::exe_name(&x));
+    play::stop(Path::new(&entry.install_dir), name.as_deref()).map(|_| ())
+}
+
+/// "Abrir como administrador" on the game page.
+#[tauri::command]
+fn set_run_as_admin(app: AppHandle, id: String, on: bool) -> Result<GameView, String> {
+    update_entry(&app, &id, |e| e.run_as_admin = on)
 }
 
 #[tauri::command]
@@ -2440,6 +2464,7 @@ pub fn run() {
             get_ra,
             play,
             stop_game,
+            set_run_as_admin,
             open_saves,
             create_shortcut,
             add_pc_game,

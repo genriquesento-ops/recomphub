@@ -1118,8 +1118,11 @@ function launchBox(g) {
   if (!g.in_library) return '';
   const env = g.env.map((v) => `${v.name}=${v.value}`).join('\n');
   return `
-    <details class="box" ${g.launch_args || g.env.length ? 'open' : ''}>
+    <details class="box" ${g.launch_args || g.env.length || g.run_as_admin ? 'open' : ''}>
       <summary><h3>Opções de inicialização</h3></summary>
+      <label class="check"><input type="checkbox" data-act="run-admin" ${g.run_as_admin ? 'checked' : ''}>
+        Abrir como administrador: o Windows pede a sua permissão toda vez que o jogo abrir. O RecompHUB liga isto
+        sozinho quando o jogo exige administrador. Nesse modo as variáveis de ambiente abaixo não são usadas.</label>
       <p class="muted">Para usuários avançados. Valem quando o jogo é aberto pelo RecompHUB (botão Jogar, atalhos e bandeja).</p>
       <p><b>Argumentos</b></p>
       <input type="text" id="launch-args" class="wide" value="${esc(g.launch_args)}" placeholder='Ex.: --fullscreen  ou  --rom "C:\\Meus jogos\\rom.z64"'>
@@ -1730,6 +1733,11 @@ async function act(action, g, el) {
       await loadProfiles();
       for (const id of Object.keys(raCache)) delete raCache[id];
       render();
+      break;
+    }
+    case 'run-admin': {
+      const updated = await call('set_run_as_admin', { id: g.id, on: el.checked });
+      if (updated) setGame(updated);
       break;
     }
     case 'settings-save':

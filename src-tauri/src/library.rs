@@ -73,6 +73,10 @@ pub struct Entry {
     /// PC game: the title Ludusavi knows it by, once found (or set by the player).
     #[serde(default)]
     pub ludusavi_name: Option<String>,
+    /// Open through Windows' administrator prompt (UAC). Turned on by itself when the
+    /// program asks for it; the player can also turn it on or off.
+    #[serde(default)]
+    pub run_as_admin: bool,
 }
 
 /// As Playnite's completion statuses. `None`: not chosen; the page shows "Não jogado" or

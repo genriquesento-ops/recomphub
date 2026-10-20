@@ -18,6 +18,7 @@
 - [x] **v0.14** Fase 3: perfis (progresso, histórico e anotações por jogador, "Quem vai jogar?" com mouse, teclado ou controle, saves separados por perfil jogo a jogo)
 - [x] **v0.15** Fase 4: conquistas do RecompHUB (gerais por tempo e sessões; Banjo-Kazooie pelo save), aviso por cima do jogo com som, 100%, aviso de teste
 - [x] **v0.16** Fase 5: RetroAchievements só leitura, por perfil, jogo achado pelo MD5 da ROM
+- [x] **v0.17** Jogos que exigem administrador abrem pelo pedido de permissão do Windows (UAC); opção "Abrir como administrador" por jogo
 - [ ] Repositório público, para o catálogo remoto e o aviso de versão do RecompHUB funcionarem
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 

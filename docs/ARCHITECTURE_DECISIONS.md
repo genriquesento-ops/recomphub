@@ -161,6 +161,16 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     horas (ou "Atualizar agora") e os ícones das conquistas para sempre. Uma ROM que o
     RetroAchievements não conhece mostra só um aviso.
 
+## Jogos que pedem administrador
+
+38. **Pedir a permissão do Windows em vez de falhar.** Um programa cujo manifesto exige
+    administrador não abre por CreateProcess (erro 740) e o Windows não mostra o UAC sozinho.
+    Nesse caso o RecompHUB abre o jogo com ShellExecuteEx "runas", que mostra o pedido de
+    permissão, e marca o jogo para abrir assim das próximas vezes (o jogador pode desligar). O
+    RecompHUB em si continua sem administrador. Como um jogo com administrador pode esconder o
+    caminho do programa, o vigia de sessões também o reconhece pelo nome do programa; e "Fechar
+    jogo" avisa que o Windows não deixa fechá-lo de fora.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa
