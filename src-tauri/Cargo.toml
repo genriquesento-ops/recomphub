@@ -3,6 +3,7 @@ name = "recomphub"
 version = "0.18.0"
 description = "Launcher for native ports of console games"
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "recomphub_lib"

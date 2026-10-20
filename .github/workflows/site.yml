@@ -1,10 +1,11 @@
-# Publishes site/ on GitHub Pages. Manual for now: GitHub Pages needs the repository to be
-# public (on the free plan). When it is, add "push: branches: [main], paths: ['site/**',
-# 'src-tauri/catalog.json']" below so the site follows every change.
+# Publishes site/ on GitHub Pages whenever the site or the catalog changes.
 name: Site
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['site/**', 'src-tauri/catalog.json', '.github/workflows/site.yml']
 
 permissions:
   contents: read

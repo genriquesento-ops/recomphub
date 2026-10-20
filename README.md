@@ -61,3 +61,7 @@ npm install
 npx tauri icon app-icon.png
 npx tauri dev
 ```
+
+## Licença
+
+Código sob a licença MIT (veja `LICENSE`). Os ports pertencem aos seus autores, cada um com a própria licença; o RecompHUB não distribui arquivos de jogos.

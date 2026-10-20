@@ -149,3 +149,18 @@ footer {
   .btn.big { width: 100%; }
   .steps ol { gap: 24px; }
 }
+
+.donate { background: linear-gradient(180deg, rgba(224, 163, 46, .07), transparent 70%); border-top: 1px solid var(--line); }
+.donate-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.donate-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 18px; border-radius: var(--radius);
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  transition: border-color .12s, transform .12s;
+}
+a.donate-card:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-2px); }
+.donate-card b { font-size: 18px; }
+.donate-card .muted { color: var(--muted); font-size: 14px; }
+.donate-card .go { margin-top: auto; color: var(--accent-2); font-size: 14px; }
+.donate-card code { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; word-break: break-all; font-size: 13px; }
+.donate-card.pix .btn { align-self: flex-start; }
+[hidden] { display: none !important; }

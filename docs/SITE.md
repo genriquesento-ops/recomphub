@@ -17,12 +17,10 @@ workflow `.github/workflows/site.yml`.
 3. O workflow Build gera o instalador e publica o Release com ele; o site e o aviso de versão
    nova dentro do RecompHUB passam a apontar para ele.
 
-## Antes de publicar o site
+## Doações
 
-- Repositório público (GitHub Pages grátis só para repositório público).
-- Licença do código (sugestão: MIT, como Playnite e Ludusavi).
-- Em Settings → Pages, escolher "GitHub Actions" como origem e rodar o workflow Site.
-- Depois, trocar o `on:` do workflow para publicar a cada mudança em `site/`.
+A seção "Apoie o projeto" lê `site/doacoes.json`: com `pix.chave` preenchida, ela aparece com o botão
+de copiar; vazia, some. Mudar o arquivo e enviar ao GitHub já atualiza o site.
 
 ## Regras do conteúdo
 

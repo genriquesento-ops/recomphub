@@ -1,0 +1,9 @@
+{
+  "_como_usar": "Coloque sua chave Pix em pix.chave e seu nome em pix.nome. Enquanto a chave estiver vazia, a seção Apoie o projeto não aparece no site.",
+  "mensagem": "O RecompHUB é gratuito e feito no tempo livre. Se ele te ajudou, um Pix ajuda a manter o projeto e a pagar a assinatura digital do instalador (aquela que tira o aviso do Windows).",
+  "pix": {
+    "chave": "",
+    "nome": ""
+  },
+  "links": []
+}

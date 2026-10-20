@@ -62,6 +62,54 @@ async function news() {
   }
 }
 
+// "Apoie o projeto": filled from doacoes.json; hidden while it has nothing.
+async function donations() {
+  let d;
+  try {
+    d = await (await fetch('doacoes.json')).json();
+  } catch {
+    return;
+  }
+  const links = (d.links || []).filter((l) => /^https:\/\//.test(l.url || ''));
+  const pix = d.pix && d.pix.chave ? d.pix : null;
+  if (!links.length && !pix) return;
+  document.getElementById('apoie-msg').textContent = d.mensagem || '';
+  const cards = [];
+  if (pix) {
+    cards.push(`
+      <div class="donate-card pix">
+        <b>Pix</b>
+        <span class="muted">${esc(pix.nome || 'Chave Pix')}</span>
+        <code id="pix-key">${esc(pix.chave)}</code>
+        <button class="btn small primary" id="pix-copy">Copiar chave</button>
+      </div>`);
+  }
+  for (const l of links) {
+    cards.push(`
+      <a class="donate-card" href="${esc(l.url)}" target="_blank" rel="noopener">
+        <b>${esc(l.nome)}</b>
+        <span class="muted">${esc(l.descricao || '')}</span>
+        <span class="go">Abrir →</span>
+      </a>`);
+  }
+  document.getElementById('apoie-opcoes').innerHTML = cards.join('');
+  document.getElementById('apoie').hidden = false;
+  document.getElementById('nav-apoie').hidden = false;
+  const copy = document.getElementById('pix-copy');
+  if (copy) {
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(pix.chave);
+        copy.textContent = 'Copiada!';
+      } catch {
+        copy.textContent = 'Selecione e copie';
+      }
+      setTimeout(() => { copy.textContent = 'Copiar chave'; }, 2500);
+    });
+  }
+}
+
 download();
 ports();
 news();
+donations();
