@@ -1045,7 +1045,7 @@ async fn check_app_update() -> Option<AppUpdate> {
     (newer && rel.html_url.starts_with(&page)).then(|| AppUpdate { version: rel.tag_name, url: rel.html_url })
 }
 
-const APP_REPO: &str = "genriquesento-ops/recomphub";
+const APP_REPO: &str = "recomphub-app/recomphub";
 
 /// "v0.7.0" → (0, 7, 0).
 fn version_tuple(v: &str) -> Option<(u32, u32, u32)> {

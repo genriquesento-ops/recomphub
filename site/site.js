@@ -3,7 +3,7 @@
 // - GitHub's "latest release" gives the installer;
 // - catalog.json (copied here when the site is published) gives the ports;
 // - the releases give the news.
-const REPO = 'genriquesento-ops/recomphub';
+const REPO = 'recomphub-app/recomphub';
 const API = `https://api.github.com/repos/${REPO}`;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

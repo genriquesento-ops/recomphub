@@ -9,7 +9,7 @@ use crate::catalog;
 
 /// The catalog in the project's repository. While the repository is private this address
 /// answers 404 and RecompHUB keeps the built-in catalog.
-const REMOTE_URL: &str = "https://raw.githubusercontent.com/genriquesento-ops/recomphub/main/src-tauri/catalog.json";
+const REMOTE_URL: &str = "https://raw.githubusercontent.com/recomphub-app/recomphub/main/src-tauri/catalog.json";
 const CACHE_FILE: &str = "catalog.json";
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 
