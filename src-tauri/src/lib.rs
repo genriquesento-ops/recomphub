@@ -2881,6 +2881,16 @@ fn open_folder(app: AppHandle, id: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The elevated copy started to open a game with its environment variables: it opens the
+    // game and ends here, before the single-instance check and any window.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some(play::ELEVATED_FLAG) {
+        let payload = args.get(2).map(String::as_str).unwrap_or("");
+        if let Err(e) = play::run_elevated_launch(payload) {
+            play::show_error(&e);
+        }
+        return;
+    }
     tauri::Builder::default()
         // A shortcut opened while RecompHUB is running goes to the open window.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {

@@ -5,7 +5,7 @@
 //! is written every 30 seconds, so a crash or closing RecompHUB loses little.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tauri::{AppHandle, Emitter, Manager};
@@ -361,16 +361,96 @@ pub fn join_args(args: &[String]) -> String {
         .join(" ")
 }
 
+/// The first argument of an elevated copy of RecompHUB that only opens a game (see
+/// `start_as_admin`).
+pub const ELEVATED_FLAG: &str = "--abrir-jogo-como-admin";
+/// Windows limits a command line to 32,767 characters.
+const MAX_ELEVATED_PAYLOAD: usize = 30_000;
+
+/// What the elevated copy opens. It travels on the command line, not in a file, so nothing can
+/// change it between the UAC prompt and the launch.
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+pub struct ElevatedLaunch {
+    pub exe: PathBuf,
+    pub dir: PathBuf,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+pub fn encode_launch(l: &ElevatedLaunch) -> Result<String, String> {
+    use base64::Engine;
+    // A path that is not valid Unicode cannot be written as JSON.
+    let json = serde_json::to_vec(l).map_err(|_| "O caminho do jogo tem caracteres que o RecompHUB não consegue repassar.".to_string())?;
+    // URL-safe base64 has no spaces or quotes, so it is one plain argument.
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json))
+}
+
+pub fn decode_launch(payload: &str) -> Option<ElevatedLaunch> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Runs in the elevated copy, before any window opens: starts the game with its variables
+/// (already as administrator, so no second prompt) and returns.
+pub fn run_elevated_launch(payload: &str) -> Result<(), String> {
+    let l = decode_launch(payload).ok_or("Pedido de abertura inválido.")?;
+    let is_exe = l.exe.extension().map(|e| e.eq_ignore_ascii_case("exe")).unwrap_or(false);
+    if !is_exe || !l.exe.is_file() {
+        return Err(format!("Não encontrei {}.", l.exe.display()));
+    }
+    if l.env.iter().any(|(k, _)| !valid_env_name(k)) {
+        return Err("Nome de variável de ambiente inválido.".into());
+    }
+    std::process::Command::new(&l.exe)
+        .current_dir(&l.dir)
+        .args(&l.args)
+        .envs(l.env.iter().map(|(k, v)| (k, v)))
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("O Windows não abriu o jogo: {e}"))
+}
+
+/// An error from the elevated copy, which has no window of its own.
+pub fn show_error(message: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (text, title) = (wide(message), wide("RecompHUB"));
+    // SAFETY: both strings are NUL-terminated and live until the call returns.
+    unsafe {
+        MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
+    }
+}
+
 /// ShellExecuteEx with the "runas" verb: Windows shows the UAC prompt and starts the program
-/// as administrator. Environment variables cannot be passed this way.
-fn start_as_admin(exe_path: &Path, dir: &Path, args: &[String]) -> Result<(), String> {
+/// as administrator. A program started this way does not get RecompHUB's environment, so when
+/// the game has variables (Opções de inicialização) the elevated program is a copy of
+/// RecompHUB that opens the game with them.
+fn start_as_admin(exe_path: &Path, dir: &Path, args: &[String], env: &[(String, String)]) -> Result<(), String> {
+    if env.is_empty() {
+        return shell_runas(exe_path, dir, &join_args(args));
+    }
+    let payload = encode_launch(&ElevatedLaunch {
+        exe: exe_path.to_path_buf(),
+        dir: dir.to_path_buf(),
+        args: args.to_vec(),
+        env: env.to_vec(),
+    })?;
+    if payload.len() > MAX_ELEVATED_PAYLOAD {
+        return Err("As variáveis de ambiente deste jogo são longas demais para abrir como administrador. Encurte-as em Opções de inicialização.".into());
+    }
+    let me = std::env::current_exe().map_err(|e| e.to_string())?;
+    shell_runas(&me, dir, &format!("{ELEVATED_FLAG} {payload}"))
+}
+
+fn shell_runas(exe_path: &Path, dir: &Path, params: &str) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW};
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
     let verb = wide(std::ffi::OsStr::new("runas"));
     let file = wide(exe_path.as_os_str());
-    let params = wide(std::ffi::OsStr::new(&join_args(args)));
+    let params = wide(std::ffi::OsStr::new(params));
     let directory = wide(dir.as_os_str());
     // SAFETY: every pointer is to a NUL-terminated buffer that lives until the call returns.
     let ok = unsafe {
@@ -409,20 +489,20 @@ pub fn start(
         return Err(format!("Não encontrei {} na pasta do jogo.", exe));
     }
     let args = split_args(args);
+    let env: Vec<(String, String)> =
+        env.iter().filter(|v| valid_env_name(&v.name)).map(|v| (v.name.clone(), v.value.clone())).collect();
     let started = if as_admin {
-        start_as_admin(&exe_path, install_dir, &args)?;
+        start_as_admin(&exe_path, install_dir, &args, &env)?;
         Started::Admin
     } else {
         let mut cmd = std::process::Command::new(&exe_path);
         cmd.current_dir(install_dir).args(&args);
-        for v in env.iter().filter(|v| valid_env_name(&v.name)) {
-            cmd.env(&v.name, &v.value);
-        }
+        cmd.envs(env.iter().map(|(k, v)| (k, v)));
         match cmd.spawn() {
             Ok(_) => Started::Normal,
             // The program asks for administrator: ask Windows for it (UAC) instead of failing.
             Err(e) if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
-                start_as_admin(&exe_path, install_dir, &args)?;
+                start_as_admin(&exe_path, install_dir, &args, &env)?;
                 Started::Admin
             }
             Err(e) => return Err(format!("O Windows não abriu o jogo: {e}")),
@@ -457,6 +537,21 @@ pub fn stop(install_dir: &Path, exe_name: Option<&str>) -> Result<usize, String>
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn elevated_launch_survives_the_command_line() {
+        let l = super::ElevatedLaunch {
+            exe: r"C:\Jogos\Meu Jogo\jogo.exe".into(),
+            dir: r"C:\Jogos\Meu Jogo".into(),
+            args: vec!["--fullscreen".into(), "com espaço".into()],
+            env: vec![("VK_DRIVER_FILES".into(), r#"C:\Mesa\lvp_icd.x86_64.json"#.into()), ("MESA_X".into(), "a \"b\" c=d".into())],
+        };
+        let p = super::encode_launch(&l).unwrap();
+        assert!(p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert_eq!(super::decode_launch(&p), Some(l));
+        assert_eq!(super::decode_launch("não é base64"), None);
+        assert!(super::run_elevated_launch(&p).unwrap_err().contains("Não encontrei"));
+    }
     use super::*;
 
     #[test]

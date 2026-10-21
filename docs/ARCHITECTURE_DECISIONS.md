@@ -170,6 +170,12 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     RecompHUB em si continua sem administrador. Como um jogo com administrador pode esconder o
     caminho do programa, o vigia de sessões também o reconhece pelo nome do programa; e "Fechar
     jogo" avisa que o Windows não deixa fechá-lo de fora.
+    Um programa aberto por "runas" não herda as variáveis de ambiente do RecompHUB. Quando o
+    jogo tem variáveis (Opções de inicialização), o pedido de permissão é para uma cópia do
+    RecompHUB com `--abrir-jogo-como-admin` e o pedido (programa, pasta, argumentos e
+    variáveis) em base64 na linha de comando, não num arquivo, para nada mudar entre o UAC e a
+    abertura. Essa cópia abre o jogo já como administrador e termina antes de abrir janela. Sem
+    variáveis, o jogo é aberto direto, como antes (v0.20.1).
 
 ## Central de Mods
 
