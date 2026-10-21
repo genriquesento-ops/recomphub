@@ -5,7 +5,9 @@ feito, o que deu errado e o que falta.
 
 ## Onde estamos
 
-- **Versão publicada:** v0.20.0 (21/10/2026): visual novo do programa, igual ao site. A v0.19.0 trouxe Steam, token do GitHub, pular versão e limite nos mods.
+- **Versão publicada:** v0.20.0 (21/10/2026), visual novo do programa.
+- **Prontas no main, ainda não publicadas (o Gustavo testa antes):** 0.20.1 (variáveis de ambiente no modo administrador), 0.21.0 (Seu PC: compatibilidade, placa de vídeo, API gráfica, antivírus), 0.22.0 (contador de FPS com PresentMon), 0.23.0 (God of War III como SpartanPort e cache de shaders). O instalador mais novo é o da 0.23.0.
+- **Catálogo remoto:** a revisão 6 já está no ar para todos (o God of War III aponta para o SpartanPort).
 - **Repositório:** público, licença MIT, na organização `recomphub-app`:
   https://github.com/recomphub-app/recomphub (o Gustavo é administrador).
 - **Site:** https://recomphub-app.github.io/recomphub/ (GitHub Pages; fica no ar com o PC desligado).
