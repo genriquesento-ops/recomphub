@@ -23,6 +23,7 @@
 - [x] **v0.19** Token do GitHub (5.000 consultas por hora), Adicionar à Steam (jogo não Steam com capa), "Pular esta versão", limite de tamanho nos pacotes de mods
 - [x] **v0.20** Visual novo do programa, no estilo de manual do site (tema escuro, um vermelho, linhas finas, Archivo nos títulos)
 - [x] **v0.21** Seu PC: aviso de compatibilidade por port (processador, vídeo, driver, Windows, Visual C++), placa de vídeo e API gráfica por jogo, antivírus explicado; variáveis de ambiente também no modo administrador
+- [x] **v0.22** Contador de FPS por cima do jogo (PresentMon da Intel, permissão de administrador uma única vez)
 - [x] Repositório público (MIT) na organização `recomphub-app`, com site no GitHub Pages; a situação atual está em `HANDOFF.md`
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 
@@ -48,6 +49,7 @@ Rodam no GitHub Actions antes de gerar o instalador (`cargo test --lib`):
 | Limites dos mods | Pacote no limite passa; arquivo ou pacote acima é recusado e a pasta temporária some |
 | Token do GitHub | Formato do token; o token só vai para api.github.com, nunca para downloads ou endereços parecidos |
 | Seu PC | Placas de vídeo lidas do PowerShell; processador sem MOVBE/BMI1/LZCNT bloqueia o gow3; driver antigo e adaptador básico avisados; valores do GpuPreference |
+| FPS | Quadros por segundo a partir do CSV do PresentMon; SID e nome do programa do PresentMon validados |
 | Steam | CRC igual ao padrão; atalhos existentes regravados byte a byte; clicar de novo atualiza sem duplicar e mantém o id; arquivo quebrado ou com dados sobrando é recusado |
 | Outros | Argumentos com aspas, nomes de variáveis, nomes de atalho, datas, comparação de versões |
 

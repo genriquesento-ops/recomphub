@@ -1394,6 +1394,38 @@ function gfxBox(g) {
     </details>`;
 }
 
+let fpsStatus = null;   // loaded when Configurações opens
+let fpsMessage = null;
+
+function fpsBox() {
+  const f = fpsStatus;
+  if (!f) return '';
+  const done = (ok, text) => `<span class="chip ${ok ? 'ready' : ''}">${text}</span>`;
+  const ready = f.tool && f.permission;
+  return `
+    <div class="box">
+      <h3>Contador de FPS</h3>
+      <p>Mostra o FPS no canto de cima da tela enquanto você joga. Quem mede é o PresentMon, da Intel, de código aberto e
+        usado pelos programas de FPS: ele lê os quadros pelo próprio Windows, sem mexer no jogo, em DirectX e Vulkan.</p>
+      <ol class="fps-steps">
+        <li>${done(f.tool, f.tool ? 'baixado' : 'falta baixar')} PresentMon
+          ${f.tool ? '' : '<button data-act="fps-download">Baixar o PresentMon (1 MB, da página oficial da Intel no GitHub)</button>'}</li>
+        <li>${done(f.permission, f.permission ? 'liberado' : f.pending_sign_in ? 'falta sair e entrar' : 'falta liberar')} Permissão do Windows
+          ${f.permission ? '' : f.pending_sign_in
+            ? '<p class="muted">Já está liberado. Saia da sua conta do Windows e entre de novo (ou reinicie o PC) para valer.</p>'
+            : `<button data-act="fps-permission">Liberar (o Windows pede administrador uma vez)</button>
+               <p class="muted">Coloca a sua conta no grupo "Usuários de log de desempenho" do Windows, que pode ler as medições de desempenho.
+                 É o mesmo que o PresentMon pede. Depois disso, nada mais pede administrador.</p>`}</li>
+        <li><label class="check"><input type="checkbox" data-act="fps-toggle" ${f.enabled ? 'checked' : ''} ${ready || f.enabled ? '' : 'disabled'}>
+          Mostrar o FPS por cima do jogo</label></li>
+      </ol>
+      ${fpsMessage ? `<p class="${fpsMessage.ok ? 'ok-text' : 'bad-text'}">${esc(fpsMessage.text)}</p>` : ''}
+      ${f.error ? `<p class="bad-text">${esc(f.error)}</p>` : ''}
+      <p class="muted">Aparece com o jogo em janela ou em tela cheia sem bordas. Em tela cheia exclusiva o Windows esconde
+        qualquer janela por cima; nesse caso, troque o modo de tela nas opções do jogo.</p>
+    </div>`;
+}
+
 function pcInfoBox() {
   if (!pcInfo) return '<div class="box"><h3>Seu PC</h3><p class="muted">Lendo as informações do PC…</p></div>';
   const i = pcInfo.info;
@@ -1550,6 +1582,7 @@ function renderSettings() {
         <div class="row"><button data-act="settings-save">Salvar</button></div>
       </div>
       ${pcInfoBox()}
+      ${fpsBox()}
       ${achievementSettingsBox()}
       ${backupSettingsBox()}
       ${keysBox()}
@@ -2223,6 +2256,34 @@ async function act(action, g, el) {
       el.disabled = false;
       break;
     }
+    case 'fps-download':
+      el.disabled = true;
+      el.textContent = 'Baixando…';
+      try {
+        fpsMessage = { ok: true, text: await invoke('fps_download') };
+      } catch (e) {
+        fpsMessage = { ok: false, text: String(e) };
+      }
+      fpsStatus = await invoke('fps_status').catch(() => fpsStatus);
+      render();
+      break;
+    case 'fps-permission':
+      el.disabled = true;
+      try {
+        await invoke('fps_request_permission');
+        fpsMessage = { ok: true, text: 'Liberado. Saia da sua conta do Windows e entre de novo (ou reinicie o PC) para o contador funcionar.' };
+      } catch (e) {
+        fpsMessage = { ok: false, text: String(e) };
+      }
+      fpsStatus = await invoke('fps_status').catch(() => fpsStatus);
+      render();
+      break;
+    case 'fps-toggle':
+      await call('set_fps_overlay', { enabled: el.checked });
+      fpsStatus = await invoke('fps_status').catch(() => fpsStatus);
+      toast(el.checked ? 'O FPS aparece na próxima vez que um jogo abrir.' : 'Contador de FPS desligado.');
+      render();
+      break;
     case 'win-security':
       await call('open_windows_security');
       break;
@@ -2770,6 +2831,9 @@ $('#btn-settings').addEventListener('click', async () => {
   achSettings = await call('get_achievement_settings');
   openId = '__settings';
   render();
+  fpsMessage = null;
+  fpsStatus = await invoke('fps_status').catch(() => null);
+  if (openId === '__settings') render();
   if (!pcInfo) {
     try { pcInfo = await invoke('get_pc_info', { refresh: false }); } catch { /* the box says it is loading */ }
     if (openId === '__settings') render();

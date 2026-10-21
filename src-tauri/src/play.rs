@@ -208,7 +208,15 @@ fn tick(app: &AppHandle, sys: &System) {
     if !started.is_empty() || !ended.is_empty() {
         crate::tray::refresh(app);
     }
+    for (id, _) in &ended {
+        crate::fps::stop(app, Some(id));
+    }
     for id in started {
+        if let Some(name) = folders.iter().find(|(i, _, _)| *i == id).and_then(|(_, _, n)| n.clone()) {
+            let (app, id) = (app.clone(), id.clone());
+            // PresentMon is started away from the watcher, which must keep its pace.
+            std::thread::spawn(move || crate::fps::start(&app, &id, &name));
+        }
         let _ = app.emit("session", serde_json::json!({ "id": id, "state": "running" }));
     }
     for (id, seconds) in ended {

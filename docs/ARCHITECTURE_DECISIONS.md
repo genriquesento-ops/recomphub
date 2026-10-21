@@ -236,6 +236,19 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     proteção. O RecompHUB nunca cria exclusões nem desliga o antivírus, e diz para só restaurar
     arquivos de ports vindos da página oficial.
 
+## Contador de FPS (v0.22)
+
+49. **PresentMon, não engenharia reversa.** O FPS vem do PresentMon da Intel (MIT), que lê os
+    quadros pelo ETW do Windows, sem injetar nada no jogo, em DirectX e Vulkan. O HWMonitor foi
+    descartado: não mede FPS e é um programa fechado. O PresentMon não vem no instalador: é
+    baixado só quando o jogador pede, da release oficial da Intel no GitHub, e só é usado com
+    assinatura digital válida da Intel. A leitura exige o grupo "Performance Log Users" (SID
+    S-1-5-32-559): por escolha do jogador, uma cópia elevada do RecompHUB coloca a conta nele uma
+    única vez (NetLocalGroupAddMembers, pelo SID, para funcionar em qualquer idioma do Windows),
+    e vale a partir do próximo login. O número aparece numa janela transparente, sem foco e que
+    ignora cliques, no canto de cima; em tela cheia exclusiva o Windows a esconde. A medição
+    começa quando o vigia vê o jogo aberto e termina com ele.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

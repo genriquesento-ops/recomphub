@@ -57,6 +57,12 @@ pub struct Settings {
     /// The player's GitHub personal access token, for more API requests per hour.
     #[serde(default)]
     pub github_token: String,
+    /// FPS counter over the game (fps.rs).
+    #[serde(default)]
+    pub fps_overlay: bool,
+    /// The one-time permission was granted; it counts after the next Windows sign-in.
+    #[serde(default)]
+    pub fps_permission_granted: bool,
 }
 
 fn ten() -> u32 {
@@ -83,6 +89,8 @@ impl Default for Settings {
             achievement_overlay: true,
             achievement_sound: true,
             github_token: String::new(),
+            fps_overlay: false,
+            fps_permission_granted: false,
         }
     }
 }

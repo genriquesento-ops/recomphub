@@ -421,3 +421,8 @@ button.small { font-size: 12px; padding: 4px 10px; }
 .pc-info dd { margin: 0; }
 .pc-info ul { margin: 0; padding-left: 0; list-style: none; }
 .pc-ok::before { content: "✓ "; color: var(--ok); }
+
+.fps-steps { margin: 10px 0; padding-left: 20px; }
+.fps-steps li { margin: 8px 0; }
+.fps-steps button { margin-left: 8px; }
+.fps-steps p { margin: 6px 0 0; }

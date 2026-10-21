@@ -5,6 +5,7 @@ mod catalog_sync;
 mod community;
 mod covers;
 mod files;
+mod fps;
 mod github;
 mod history;
 mod install;
@@ -1348,6 +1349,55 @@ fn set_graphics_api(app: AppHandle, id: String, api: String) -> Result<(), Strin
 fn open_windows_security(app: AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     app.opener().open_url("windowsdefender://threat/", None::<&str>).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct FpsStatus {
+    /// PresentMon downloaded.
+    tool: bool,
+    /// The account may read the frame events in this sign-in.
+    permission: bool,
+    /// Granted, but Windows only applies it after signing out and in.
+    pending_sign_in: bool,
+    enabled: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn fps_status(app: AppHandle) -> Result<FpsStatus, String> {
+    let tool = fps::tool_path(&app).map(|p| p.is_file()).unwrap_or(false);
+    let permission = tauri::async_runtime::spawn_blocking(fps::has_permission).await.map_err(|e| e.to_string())?;
+    let s = app.state::<AppState>().settings.lock().unwrap().clone();
+    Ok(FpsStatus { tool, permission, pending_sign_in: !permission && s.fps_permission_granted, enabled: s.fps_overlay, error: fps::last_error() })
+}
+
+#[tauri::command]
+async fn fps_download(app: AppHandle) -> Result<String, String> {
+    let tag = fps::download(&app).await?;
+    Ok(format!("PresentMon {tag} baixado e conferido (assinatura digital da Intel)."))
+}
+
+#[tauri::command]
+async fn fps_request_permission(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(fps::request_permission).await.map_err(|e| e.to_string())??;
+    let state = app.state::<AppState>();
+    let mut s = state.settings.lock().unwrap();
+    s.fps_permission_granted = true;
+    s.save(&state.settings_path)
+}
+
+#[tauri::command]
+fn set_fps_overlay(app: AppHandle, enabled: bool) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.settings.lock().unwrap();
+        s.fps_overlay = enabled;
+        s.save(&state.settings_path)?;
+    }
+    if !enabled {
+        fps::stop(&app, None);
+    }
+    Ok(())
 }
 
 /// "Pular esta versão" (`skip`) or "Avisar de novo". Skips the newest release known now.
@@ -2975,6 +3025,10 @@ pub fn run() {
     // The elevated copy started to open a game with its environment variables: it opens the
     // game and ends here, before the single-instance check and any window.
     let args: Vec<String> = std::env::args().collect();
+    // The elevated copy that adds the account to "Performance Log Users" (Contador de FPS).
+    if args.get(1).map(String::as_str) == Some(fps::GRANT_FLAG) {
+        std::process::exit(fps::grant(args.get(2).map(String::as_str).unwrap_or("")));
+    }
     if args.get(1).map(String::as_str) == Some(play::ELEVATED_FLAG) {
         let payload = args.get(2).map(String::as_str).unwrap_or("");
         if let Err(e) = play::run_elevated_launch(payload) {
@@ -3113,6 +3167,10 @@ pub fn run() {
             set_gpu_preference,
             set_graphics_api,
             open_windows_security,
+            fps_status,
+            fps_download,
+            fps_request_permission,
+            set_fps_overlay,
             reset_playtime,
             uninstall_game,
             backup_saves,
