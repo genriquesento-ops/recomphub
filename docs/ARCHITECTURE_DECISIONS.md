@@ -217,6 +217,25 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     original fica em `shortcuts.vdf.recomphub-backup`. O id é o que a própria Steam calcularia,
     e capa e banner viram a arte do atalho na pasta `grid`.
 
+## Seu PC (v0.21, dos issues dos ports)
+
+46. **Avisar antes, com o que o próprio PC diz.** As causas mais comuns de "o port não abre"
+    nos issues dos projetos são do PC: processador sem as instruções que o código do jogo usa
+    (gow3_pc com Sandy/Ivy Bridge e Xeons antigos, erro 0xc000001d), driver de vídeo antigo ou
+    ausente, Windows desatualizado e Visual C++ faltando. O RecompHUB lê isso sem administrador
+    (CPUID, com o XGETBV para as instruções AVX; Win32_VideoController pelo PowerShell, uma vez
+    por execução; registro do Windows; DLLs do System32) e mostra na página do jogo. Instruções
+    exigidas vêm do catálogo (`cpu_features`) e só entram com confirmação do projeto. O aviso
+    não impede o jogador de tentar.
+47. **Placa de vídeo e API gráfica por jogo.** A placa usa a mesma opção das Configurações do
+    Windows (`HKCUSoftwareMicrosoftDirectXUserGpuPreferences`, por caminho do programa). Nos
+    ports N64, só o `api_option` do `graphics.json` do port muda (Auto, D3D12, Vulkan), com o jogo
+    fechado, porque trocar para Vulkan resolveu notebooks que renderizavam na placa integrada.
+48. **Antivírus explicado, não contornado.** Os erros 225/226 do Windows e o programa do port
+    sumido de uma pasta que ainda existe viram uma explicação com o caminho até o Histórico de
+    proteção. O RecompHUB nunca cria exclusões nem desliga o antivírus, e diz para só restaurar
+    arquivos de ports vindos da página oficial.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

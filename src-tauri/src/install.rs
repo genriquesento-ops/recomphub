@@ -143,9 +143,10 @@ fn extract(app: &AppHandle, id: &str, zip_path: &Path, target: &Path, keep: &[St
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let mut f = std::fs::File::create(&out)
-            .map_err(|e| format!("Não consegui gravar {} (o jogo está aberto?): {e}", out.display()))?;
-        std::io::copy(&mut entry, &mut f).map_err(|e| e.to_string())?;
+        let mut f = std::fs::File::create(&out).map_err(|e| {
+            crate::play::antivirus_error(&e).unwrap_or_else(|| format!("Não consegui gravar {} (o jogo está aberto?): {e}", out.display()))
+        })?;
+        std::io::copy(&mut entry, &mut f).map_err(|e| crate::play::antivirus_error(&e).unwrap_or_else(|| e.to_string()))?;
         if i % 16 == 0 {
             emit(app, id, "extract", i as u64, total);
         }

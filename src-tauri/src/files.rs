@@ -72,6 +72,35 @@ pub fn n64_data_dir(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     n64::data_dir(&game.files, install_dir)
 }
 
+/// RT64's graphics API in an N64: Recompiled port's graphics.json: "Auto", "D3D12" or
+/// "Vulkan". None for other ports, and before the port's first run (the file does not exist).
+pub fn n64_graphics_api(game: &GameDef, install_dir: &Path) -> Option<String> {
+    let path = n64_data_dir(game, install_dir)?.join("graphics.json");
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    Some(v.get("api_option").and_then(|a| a.as_str()).unwrap_or("Auto").to_string())
+}
+
+pub const GRAPHICS_APIS: &[&str] = &["Auto", "D3D12", "Vulkan"];
+
+/// Changes only "api_option"; everything else the port wrote stays. Switching to Vulkan is
+/// what fixed notebooks rendering on the integrated graphics (Zelda64Recomp issue 173).
+pub fn set_n64_graphics_api(game: &GameDef, install_dir: &Path, api: &str) -> Result<(), String> {
+    if !GRAPHICS_APIS.contains(&api) {
+        return Err("Opção inválida.".into());
+    }
+    let path = n64_data_dir(game, install_dir).ok_or("Este port não usa graphics.json.")?.join("graphics.json");
+    let bytes = std::fs::read(&path).map_err(|_| "Abra o jogo uma vez antes: ele cria as configurações de vídeo na primeira vez.".to_string())?;
+    let mut v: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| "As configurações de vídeo do jogo estão num formato que eu não conheço; não mexi nelas.".to_string())?;
+    let obj = v.as_object_mut().ok_or("As configurações de vídeo do jogo estão num formato que eu não conheço; não mexi nelas.")?;
+    obj.insert("api_option".into(), serde_json::Value::String(api.into()));
+    let text = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.recomphub-tmp");
+    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("Não consegui gravar as configurações de vídeo: {e}")
+    })
+}
+
 /// The player's ROM as the port stored it (.z64 byte order), once provided.
 pub fn n64_rom_file(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     let Verifier::N64Rom { game_id, .. } = &game.files else { return None };

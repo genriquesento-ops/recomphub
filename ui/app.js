@@ -316,6 +316,7 @@ function renderPcDetail(g) {
         </div>
         ${missing}
         ${playRow(g, 'o jogo')}
+        ${gfxBox(g)}
         ${shortcutsRow(g)}
         <div class="box">
           <h3>Nome</h3>
@@ -1290,6 +1291,142 @@ async function openCovers() {
   render();
 }
 
+// ---- Seu PC: what stands between this PC and the game, graphics card and API ----
+
+const pcChecks = {};   // id -> 'loading' | [{level, text, link}]
+const gfx = {};        // id -> 'loading' | {gpus, preference, api, n64}
+let pcInfo = null;     // {info, report} for Configurações
+
+async function loadPcCheck(id) {
+  pcChecks[id] = 'loading';
+  try {
+    pcChecks[id] = await invoke('pc_check', { id });
+  } catch {
+    pcChecks[id] = [];
+  }
+  if (openId === id) render();
+}
+
+async function loadGfx(id) {
+  gfx[id] = 'loading';
+  try {
+    gfx[id] = await invoke('get_graphics', { id });
+  } catch {
+    gfx[id] = null;
+  }
+  if (openId === id) render();
+}
+
+function findingLink(f) {
+  return f.link ? ` <button class="link" data-act="link" data-url="${esc(f.link[1])}">${esc(f.link[0])}</button>` : '';
+}
+
+function pcCheckBox(g) {
+  if (g.kind === 'pc_game') return '';
+  const list = pcChecks[g.id];
+  if (list === undefined) {
+    setTimeout(() => loadPcCheck(g.id), 0);
+    return '';
+  }
+  if (!Array.isArray(list) || !list.length) return '';
+  if (list.every((x) => x.level === 'ok')) {
+    return `<p class="muted pc-ok">Seu PC: ${esc(list[0].text)}</p>`;
+  }
+  const bad = list.some((x) => x.level === 'bad');
+  const items = list.filter((x) => x.level !== 'ok')
+    .map((x) => `<li class="${x.level === 'bad' ? 'bad-text' : ''}">${esc(x.text)}${findingLink(x)}</li>`).join('');
+  return `
+    <div class="box ${bad ? 'bad' : 'warn'}">
+      <h3>${bad ? 'Este port não deve rodar no seu PC' : 'Pode dar problema no seu PC'}</h3>
+      <ul>${items}</ul>
+      <p class="muted">O RecompHUB conferiu processador, placa de vídeo, driver, Windows e o Visual C++.
+        Detalhes em Configurações > Seu PC.</p>
+    </div>`;
+}
+
+function lostFilesBox(g) {
+  if (!g.lost_files) return '';
+  return `
+    <div class="box bad">
+      <h3>Os arquivos do port sumiram da pasta</h3>
+      <p>A pasta continua lá, mas o programa do jogo não. Quase sempre é o antivírus. Com programas novos e sem
+        assinatura pode ser alarme falso, mas nem sempre é.</p>
+      <p>Veja o arquivo em Segurança do Windows > Proteção contra vírus e ameaças > Histórico de proteção. Só restaure se o
+        port veio da página oficial do projeto pelo RecompHUB; na dúvida, pergunte no GitHub do projeto antes. Depois
+        clique em Reinstalar. Seus saves são mantidos.</p>
+      <div class="row">
+        <button data-act="win-security">Abrir Segurança do Windows</button>
+        <button class="ghost" data-act="${g.kind === 'community' ? 'community-update' : 'install'}">Reinstalar</button>
+      </div>
+    </div>`;
+}
+
+const GPU_PREFS = [[0, 'Deixar o Windows escolher'], [1, 'Economia de energia'], [2, 'Alto desempenho']];
+const APIS = [['Auto', 'Automática'], ['D3D12', 'DirectX 12'], ['Vulkan', 'Vulkan']];
+
+function gfxBox(g) {
+  if (!g.in_library || ['not_installed', 'installing', 'missing', 'needs_exe'].includes(g.status)) return '';
+  const v = gfx[g.id];
+  if (v === undefined) {
+    setTimeout(() => loadGfx(g.id), 0);
+    return '';
+  }
+  if (!v || v === 'loading') return '';
+  const multi = v.gpus.length >= 2;
+  if (!multi && !v.n64) return '';
+  const choice = (act, list, current) => list.map(([val, label]) =>
+    `<button class="${String(val) === String(current) ? 'primary' : 'ghost'}" data-act="${act}" data-v="${val}">${label}</button>`).join('');
+  const running = IN_GAME.includes(g.status);
+  return `
+    <details class="box" ${v.preference || (v.api && v.api !== 'Auto') ? 'open' : ''}>
+      <summary><h3>Vídeo</h3></summary>
+      ${multi ? `
+        <p><b>Placa de vídeo para este jogo</b></p>
+        <div class="row">${choice('gpu-pref', GPU_PREFS, v.preference)}</div>
+        <p class="muted">Seu PC tem ${v.gpus.map(esc).join(' e ')}. Em notebook, "Alto desempenho" costuma ser a placa dedicada, a
+          mais forte. É a mesma opção de Configurações do Windows > Tela > Gráficos e vale na próxima vez que o jogo abrir.</p>` : ''}
+      ${v.n64 ? (v.api ? `
+        <p><b>API gráfica</b></p>
+        <div class="row">${choice('gfx-api', APIS, v.api)}</div>
+        <p class="muted">Se o jogo abre com tela preta, fecha sozinho ou usa a placa integrada, tente Vulkan; se piorar,
+          volte para Automática.${running ? ' Feche o jogo para trocar.' : ''}</p>`
+        : '<p class="muted">Abra o jogo uma vez para poder escolher a API gráfica (DirectX 12 ou Vulkan) aqui.</p>') : ''}
+    </details>`;
+}
+
+function pcInfoBox() {
+  if (!pcInfo) return '<div class="box"><h3>Seu PC</h3><p class="muted">Lendo as informações do PC…</p></div>';
+  const i = pcInfo.info;
+  const year = (t) => (t ? new Date(t * 1000).toLocaleDateString('pt-BR') : 'data desconhecida');
+  const gpus = i.gpus.length ? i.gpus.map((g) => `<li>${esc(g.name)} · driver ${esc(g.driver_version || '?')} de ${year(g.driver_date)}
+    ${g.vendor ? ` <button class="link" data-act="link" data-url="${esc(DRIVER_PAGES[g.vendor] || '')}">driver mais novo</button>` : ''}</li>`).join('')
+    : '<li class="bad-text">Nenhuma placa de vídeo encontrada.</li>';
+  return `
+    <div class="box">
+      <h3>Seu PC</h3>
+      <dl class="pc-info">
+        <dt>Sistema</dt><dd>${esc(i.windows)}</dd>
+        <dt>Processador</dt><dd>${esc(i.cpu)}<br><span class="muted">Instruções: ${esc(i.cpu_features.join(', ').toUpperCase())}</span></dd>
+        <dt>Memória</dt><dd>${i.ram_gb} GB</dd>
+        <dt>Vídeo</dt><dd><ul>${gpus}</ul></dd>
+        <dt>Visual C++</dt><dd>${i.vc_runtime ? 'instalado' : '<span class="bad-text">não encontrado</span> <button class="link" data-act="link" data-url="https://learn.microsoft.com/pt-br/cpp/windows/latest-supported-vc-redist">página da Microsoft</button>'}</dd>
+      </dl>
+      <div class="row">
+        <button data-act="pc-copy">Copiar informações</button>
+        <button class="ghost" data-act="pc-refresh">Ler de novo</button>
+        <button class="ghost" data-act="win-security">Abrir Segurança do Windows</button>
+      </div>
+      <p class="muted">Cada port mostra na página dele se algo aqui impede o jogo de rodar. "Copiar informações" ajuda quando
+        for pedir ajuda no GitHub do port.</p>
+    </div>`;
+}
+
+const DRIVER_PAGES = {
+  NVIDIA: 'https://www.nvidia.com/pt-br/drivers/',
+  AMD: 'https://www.amd.com/pt/support/download/drivers.html',
+  Intel: 'https://www.intel.com.br/content/www/br/pt/support/detect.html',
+};
+
 function launchBox(g) {
   if (!g.in_library) return '';
   const env = g.env.map((v) => `${v.name}=${v.value}`).join('\n');
@@ -1412,6 +1549,7 @@ function renderSettings() {
           Mostrar jogos ocultos na biblioteca.</label>
         <div class="row"><button data-act="settings-save">Salvar</button></div>
       </div>
+      ${pcInfoBox()}
       ${achievementSettingsBox()}
       ${backupSettingsBox()}
       ${keysBox()}
@@ -1486,7 +1624,7 @@ function renderPortDetail(g) {
   if (g.status === 'installing') {
     main = progressBox(g);
   } else if (g.status === 'not_installed') {
-    main = `
+    main = lostFilesBox(g) + pcCheckBox(g) + `
       <div class="box">
         <h3>Instalar</h3>
         <p>O RecompHUB baixa a versão mais recente do port na página oficial do projeto${latest ? ` (${esc(latest)})` : ''} e depois pede os arquivos da sua cópia.</p>
@@ -1510,7 +1648,9 @@ function renderPortDetail(g) {
     }
     main += skippedNote(g);
     main += playRow(g, 'o port');
+    main += pcCheckBox(g);
     main += filesBox(g);
+    main += gfxBox(g);
     main += modsBox(g);
     main += shortcutsRow(g);
     main += versionBox(g);
@@ -2083,6 +2223,36 @@ async function act(action, g, el) {
       el.disabled = false;
       break;
     }
+    case 'win-security':
+      await call('open_windows_security');
+      break;
+    case 'pc-copy':
+      try {
+        await navigator.clipboard.writeText(pcInfo.report);
+        toast('Informações do PC copiadas.');
+      } catch {
+        toast('Não consegui copiar.', true);
+      }
+      break;
+    case 'pc-refresh':
+      el.disabled = true;
+      pcInfo = await call('get_pc_info', { refresh: true });
+      for (const k of Object.keys(pcChecks)) delete pcChecks[k];
+      for (const k of Object.keys(gfx)) delete gfx[k];
+      render();
+      break;
+    case 'gpu-pref':
+      await call('set_gpu_preference', { id: g.id, preference: Number(el.dataset.v) });
+      gfx[g.id].preference = Number(el.dataset.v);
+      toast('Vale na próxima vez que o jogo abrir.');
+      render();
+      break;
+    case 'gfx-api':
+      await call('set_graphics_api', { id: g.id, api: el.dataset.v });
+      gfx[g.id].api = el.dataset.v;
+      toast(`API gráfica: ${el.textContent}. Vale na próxima vez que o jogo abrir.`);
+      render();
+      break;
     case 'skip-update':
     case 'unskip-update':
       setGame(await call('skip_update', { id: g.id, skip: action === 'skip-update' }));
@@ -2440,8 +2610,11 @@ function renderCommunityDetail(g) {
         </div>
         ${g.status === 'installing' ? progressBox(g) : ''}
         ${update}
+        ${lostFilesBox(g)}
         ${playRow(g, 'o port')}
+        ${pcCheckBox(g)}
         ${exeBox}
+        ${gfxBox(g)}
         <p class="muted">Port não verificado pelo RecompHUB: os arquivos do jogo seguem o README do projeto.</p>
         ${shortcutsRow(g)}
         ${g.status !== 'needs_exe' && !choices ? '<div class="row"><button class="ghost" data-act="exe-list">Trocar o programa do botão Jogar</button></div>' : ''}
@@ -2597,6 +2770,10 @@ $('#btn-settings').addEventListener('click', async () => {
   achSettings = await call('get_achievement_settings');
   openId = '__settings';
   render();
+  if (!pcInfo) {
+    try { pcInfo = await invoke('get_pc_info', { refresh: false }); } catch { /* the box says it is loading */ }
+    if (openId === '__settings') render();
+  }
 });
 
 async function checkAppUpdate() {

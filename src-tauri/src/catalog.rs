@@ -69,6 +69,10 @@ pub struct GameDef {
     /// .nrm files declare. None: no mods.
     #[serde(default)]
     pub mods: Option<ModsDef>,
+    /// Instruction sets the port's code needs from the processor (pcinfo::CPU_FEATURES); a PC
+    /// without them is told before installing.
+    #[serde(default)]
+    pub cpu_features: Vec<String>,
     pub title: String,
     pub family: String,
     #[serde(default)]
@@ -172,6 +176,9 @@ pub fn validate(g: &GameDef) -> Result<(), String> {
         if !crate::mods::valid_community(&m.thunderstore) || !slug(&m.game_id) || !matches!(g.files, Verifier::N64Rom { .. }) {
             return err("mods inválidos");
         }
+    }
+    if !g.cpu_features.iter().all(|f| crate::pcinfo::CPU_FEATURES.contains(&f.as_str())) {
+        return err("cpu_features desconhecido");
     }
     if g.markers.is_empty() || !g.markers.iter().all(|m| safe_relative(m)) {
         return err("markers inválidos");

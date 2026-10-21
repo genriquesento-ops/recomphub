@@ -337,6 +337,17 @@ pub fn valid_env_name(name: &str) -> bool {
 const ERROR_ELEVATION_REQUIRED: i32 = 740;
 /// The player said no on the UAC prompt.
 const ERROR_CANCELLED: i32 = 1223;
+/// "The file contains a virus" / "...was deleted": the antivirus blocked or removed it.
+const ERROR_VIRUS_INFECTED: i32 = 225;
+const ERROR_VIRUS_DELETED: i32 = 226;
+
+/// What to tell the player when the antivirus is the reason. Ports are new, unsigned programs,
+/// and Windows Defender sometimes flags one (a false positive, as with Donkey Kong 64).
+pub const ANTIVIRUS_HELP: &str = "O antivírus bloqueou ou apagou um arquivo do port. Com programas novos e sem assinatura isso pode ser alarme falso, mas nem sempre é. Veja o arquivo em Segurança do Windows > Proteção contra vírus e ameaças > Histórico de proteção. Só restaure se o port veio da página oficial do projeto pelo RecompHUB; na dúvida, pergunte no GitHub do projeto antes.";
+
+pub fn antivirus_error(e: &std::io::Error) -> Option<String> {
+    matches!(e.raw_os_error(), Some(ERROR_VIRUS_INFECTED) | Some(ERROR_VIRUS_DELETED)).then(|| ANTIVIRUS_HELP.to_string())
+}
 
 /// How the game was opened.
 #[derive(PartialEq, Debug)]
@@ -486,7 +497,12 @@ pub fn start(
 ) -> Result<Started, String> {
     let exe_path = install_dir.join(exe);
     if !exe_path.is_file() {
-        return Err(format!("Não encontrei {} na pasta do jogo.", exe));
+        // The folder is there but the program is not: usually the antivirus took it.
+        return Err(if install_dir.is_dir() {
+            format!("Não encontrei {} na pasta do jogo. {ANTIVIRUS_HELP}", exe)
+        } else {
+            format!("Não encontrei {} na pasta do jogo.", exe)
+        });
     }
     let args = split_args(args);
     let env: Vec<(String, String)> =
@@ -505,7 +521,7 @@ pub fn start(
                 start_as_admin(&exe_path, install_dir, &args, &env)?;
                 Started::Admin
             }
-            Err(e) => return Err(format!("O Windows não abriu o jogo: {e}")),
+            Err(e) => return Err(antivirus_error(&e).unwrap_or_else(|| format!("O Windows não abriu o jogo: {e}"))),
         }
     };
     app.state::<AppState>().sessions.lock().unwrap().launching.insert(id.to_string(), Instant::now());

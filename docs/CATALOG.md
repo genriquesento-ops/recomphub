@@ -36,6 +36,7 @@ Enquanto o repositório for privado, o endereço remoto responde 404 e só a có
 | `markers` | Arquivos que identificam uma pasta como sendo deste port. |
 | `keep_on_update` | Arquivos ou pastas (terminadas em `/`) que a atualização não sobrescreve. |
 | `requirements`, `needs`, `files_help` | Textos da página do jogo. |
+| `cpu_features` | Opcional. Instruções que o código do port exige do processador (`sse4.1`, `sse4.2`, `popcnt`, `avx`, `avx2`, `fma`, `f16c`, `bmi1`, `bmi2`, `lzcnt`, `movbe`). Num PC sem elas, a página do jogo avisa antes de instalar. Só coloque o que o projeto confirmou (issue, README ou log de erro 0xc000001d). |
 | `files` | Como conferir os arquivos da cópia do usuário (veja abaixo). |
 | `saves` | Pastas de saves, com `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%` ou `{install}`. |
 | `cover_files`, `cover_urls`, `serial` | Fontes de capa: imagem na pasta do port, endereços curados e o serial para `${serial}`. |

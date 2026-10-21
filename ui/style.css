@@ -414,3 +414,10 @@ button.small { font-size: 12px; padding: 4px 10px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #4d463e; }
+
+/* Seu PC */
+.pc-info { display: grid; grid-template-columns: 8em 1fr; gap: 8px 16px; margin: 8px 0 12px; }
+.pc-info dt { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding-top: 3px; }
+.pc-info dd { margin: 0; }
+.pc-info ul { margin: 0; padding-left: 0; list-style: none; }
+.pc-ok::before { content: "✓ "; color: var(--ok); }

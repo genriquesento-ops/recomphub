@@ -12,9 +12,11 @@ mod library;
 mod ludusavi;
 mod meta;
 mod mods;
+mod pcinfo;
 mod play;
 mod profiles;
 mod ra;
+mod reg;
 mod saves;
 mod shortcut;
 mod steam;
@@ -109,6 +111,9 @@ struct GameView {
     ignore_updates: bool,
     /// Release tag the player chose to skip.
     skipped_version: Option<String>,
+    /// Installed by RecompHUB, the folder is there, but the port's files are not: usually the
+    /// antivirus removed them.
+    lost_files: bool,
     /// Installed by RecompHUB (it may uninstall it), not added from the player's folder.
     installed_by_hub: bool,
     /// Saves kept from an uninstall, waiting for the next install.
@@ -241,6 +246,8 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         icon: None,
         ignore_updates: entry.as_ref().map(|e| e.ignore_updates).unwrap_or(false),
         skipped_version: entry.as_ref().and_then(|e| e.skipped_version.clone()),
+        lost_files: !installed
+            && dir.as_deref().map(|d| d.is_dir() && d.starts_with(&state.games_root)).unwrap_or(false),
         installed_by_hub: entry.as_ref().map(|e| e.version.is_some() && Path::new(&e.install_dir).starts_with(&state.games_root)).unwrap_or(false),
         pending_saves: state.pending_root.join(&game.id).is_dir(),
         favorite: entry.as_ref().map(|e| e.favorite).unwrap_or(false),
@@ -317,6 +324,7 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         icon: covers::find(&state.covers.icons, id).and_then(|p| data_url(&p)),
         ignore_updates: entry.ignore_updates,
         skipped_version: entry.skipped_version.clone(),
+        lost_files: community && status == "missing" && Path::new(&entry.install_dir).is_dir(),
         installed_by_hub,
         pending_saves: state.pending_root.join(id).is_dir(),
         favorite: entry.favorite,
@@ -1257,6 +1265,89 @@ fn set_ignore_updates(app: AppHandle, id: String, ignore: bool) -> Result<GameVi
     state.library.lock().unwrap().games.get_mut(&id).ok_or("Jogo fora da biblioteca.")?.ignore_updates = ignore;
     save(&state)?;
     view_any(&state, &id)
+}
+
+#[derive(Serialize)]
+struct PcView {
+    info: pcinfo::PcInfo,
+    report: String,
+}
+
+/// "Seu PC" in Configurações. `refresh` reads everything again (after a driver update).
+#[tauri::command]
+async fn get_pc_info(refresh: bool) -> Result<PcView, String> {
+    let info = tauri::async_runtime::spawn_blocking(move || pcinfo::get(refresh)).await.map_err(|e| e.to_string())?;
+    Ok(PcView { report: pcinfo::report(&info), info })
+}
+
+/// What this PC means for one game: blocking problems first, then common causes of trouble.
+#[tauri::command]
+async fn pc_check(id: String) -> Result<Vec<pcinfo::Finding>, String> {
+    let required = catalog::get(&id).map(|g| g.cpu_features.clone()).unwrap_or_default();
+    let info = tauri::async_runtime::spawn_blocking(|| pcinfo::get(false)).await.map_err(|e| e.to_string())?;
+    Ok(pcinfo::check(&info, &required, library::now()))
+}
+
+/// The game's program, for Windows' per-program graphics setting.
+fn game_exe(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    let entry = app.state::<AppState>().library.lock().unwrap().games.get(id).cloned().ok_or("Jogo fora da biblioteca.")?;
+    match catalog::get(id) {
+        Some(game) => Ok(Path::new(&entry.install_dir).join(&game.exe)),
+        None => pc_exe(&entry).ok_or_else(|| "Jogo sem programa definido.".to_string()),
+    }
+}
+
+#[derive(Serialize)]
+struct GraphicsView {
+    /// Video cards other than Windows' basic adapter.
+    gpus: Vec<String>,
+    /// 0 = Windows decides, 1 = power saving, 2 = high performance.
+    preference: u8,
+    /// N64: Recompiled ports: "Auto", "D3D12" or "Vulkan"; None otherwise or before the first run.
+    api: Option<String>,
+    n64: bool,
+}
+
+#[tauri::command]
+async fn get_graphics(app: AppHandle, id: String) -> Result<GraphicsView, String> {
+    let exe = game_exe(&app, &id)?;
+    let info = tauri::async_runtime::spawn_blocking(|| pcinfo::get(false)).await.map_err(|e| e.to_string())?;
+    let dir = app.state::<AppState>().library.lock().unwrap().games.get(&id).map(|e| PathBuf::from(&e.install_dir));
+    let game = catalog::get(&id);
+    let n64 = game.map(|g| matches!(g.files, catalog::Verifier::N64Rom { .. })).unwrap_or(false);
+    let api = match (game, dir.as_deref()) {
+        (Some(g), Some(d)) if n64 => files::n64_graphics_api(g, d),
+        _ => None,
+    };
+    Ok(GraphicsView {
+        gpus: info.gpus.iter().filter(|g| !g.name.to_lowercase().contains("basic")).map(|g| g.name.clone()).collect(),
+        preference: pcinfo::gpu_preference(&exe),
+        api,
+        n64,
+    })
+}
+
+#[tauri::command]
+fn set_gpu_preference(app: AppHandle, id: String, preference: u8) -> Result<(), String> {
+    pcinfo::set_gpu_preference(&game_exe(&app, &id)?, preference)
+}
+
+#[tauri::command]
+fn set_graphics_api(app: AppHandle, id: String, api: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.sessions.lock().unwrap().is_running(&id) {
+        return Err("Feche o jogo antes: ele regrava as configurações de vídeo ao sair.".into());
+    }
+    let game = game_or_err(&id)?;
+    let dir = state.library.lock().unwrap().games.get(&id).map(|e| PathBuf::from(&e.install_dir)).ok_or("Jogo fora da biblioteca.")?;
+    files::set_n64_graphics_api(game, &dir, &api)
+}
+
+/// Segurança do Windows > Proteção contra vírus e ameaças, where quarantined files are.
+#[tauri::command]
+fn open_windows_security(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url("windowsdefender://threat/", None::<&str>).map_err(|e| e.to_string())
 }
 
 /// "Pular esta versão" (`skip`) or "Avisar de novo". Skips the newest release known now.
@@ -3016,6 +3107,12 @@ pub fn run() {
             set_executable,
             set_ignore_updates,
             skip_update,
+            get_pc_info,
+            pc_check,
+            get_graphics,
+            set_gpu_preference,
+            set_graphics_api,
+            open_windows_security,
             reset_playtime,
             uninstall_game,
             backup_saves,

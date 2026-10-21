@@ -1,9 +1,10 @@
 {
   "format": 1,
-  "revision": 3,
+  "revision": 4,
   "ports": [
     {
       "id": "gow3",
+      "cpu_features": ["avx", "movbe", "bmi1", "lzcnt", "f16c"],
       "title": "God of War III Remastered",
       "family": "PS4",
       "tags": ["ps4", "ação"],
