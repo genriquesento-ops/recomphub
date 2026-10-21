@@ -5,7 +5,9 @@ feito, o que deu errado e o que falta.
 
 ## Onde estamos
 
-- **Versão atual:** v0.18.1, publicada como Release no GitHub (instalador `RecompHUB_0.18.1_x64-setup.exe`).
+- **Versão publicada:** v0.18.1 (Release no GitHub).
+- **Versão pronta, ainda não publicada:** v0.19.0. O código está no main, o build e os 57 testes passaram, e o
+  instalador está em `Desktop\calude\instalador`. Falta testar no Windows e criar a tag `v0.19.0` para publicar.
 - **Repositório:** público, licença MIT, na organização `recomphub-app`:
   https://github.com/recomphub-app/recomphub (o Gustavo é administrador).
 - **Site:** https://recomphub-app.github.io/recomphub/ (GitHub Pages; fica no ar com o PC desligado).
@@ -37,6 +39,7 @@ Erros de compilação só aparecem no CI: `gh run view --log-failed`.
 | v0.17 | Jogos que exigem administrador abrem pelo pedido de permissão do Windows (UAC); opção por jogo |
 | v0.18.0 | Central de Mods (Thunderstore) para Majora's Mask e Banjo: dependências, ligar/desligar, mods por perfil, coleções |
 | v0.18.1 | Projeto movido para a organização `recomphub-app`; aviso de versão e catálogo remoto apontam para lá |
+| v0.19.0 | Token do GitHub (5.000 consultas por hora), Adicionar à Steam (jogo não Steam com capa), "Pular esta versão", limite de tamanho nos mods. Ideias do GithubLauncher; revisão pelo Codex |
 
 Fora do programa:
 
@@ -67,7 +70,7 @@ Fora do programa:
 
 ## O que falta
 
-1. **Gustavo testar a v0.18.1 no Windows** e contar o que deu errado. Prioridade: arrastar a ROM,
+1. **Gustavo testar a v0.19.0 no Windows** e, se estiver tudo bem, publicar com a tag `v0.19.0`. Prioridade nova: Adicionar à Steam (com a Steam fechada), token do GitHub e Pular esta versão. Também testar o que veio antes, e contar o que deu errado. Prioridade: arrastar a ROM,
    perfis, backup automático, conquistas do Banjo (aviso por cima do jogo), Central de Mods e um jogo
    que exige administrador.
 2. **Chave Pix** em `site/doacoes.json` (`pix.chave` e `pix.nome`). A chave fica pública: usar chave
