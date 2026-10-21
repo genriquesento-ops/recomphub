@@ -268,6 +268,20 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     "Desfazer" a devolve; nada é apagado sem uma cópia. Compartilhar cache entre jogadores fica de
     fora: depende da placa e do driver, e contém shaders do próprio jogo.
 
+## Comunidade maior (v0.24)
+
+52. **Mais formatos, nenhum instalador.** Ports da Comunidade podem vir em .zip, .7z ou como um
+    .exe portátil. No .7z, cada nome é conferido antes de gravar (nada fora da pasta, nenhum nome
+    de dispositivo do Windows, links ignorados) e o pacote é recusado inteiro se um falhar.
+    Instaladores (Setup .exe, .msi) nunca são rodados pelo RecompHUB: a página explica e leva à
+    página de versões do projeto; depois o jogador adiciona o jogo como jogo de PC. A página
+    também separa "o projeto ainda não publicou versão" de "só há arquivos para outros sistemas".
+53. **O nome do jogo, não o do repositório.** Resultados por tópico do GitHub não dizem o jogo, e
+    um cartão "iss_pc" não é reconhecido como inFAMOUS Second Son. O nome sai da descrição
+    ("port of X", "X native PC port"), com regras testadas nas descrições reais da lista; quando
+    a descrição não diz, fica o nome do repositório. Entraram os tópicos `native-port`,
+    `xenonrecomp` e `ps3recomp`, e ports para outras máquinas (3DS, Vita, Switch) ficam de fora.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

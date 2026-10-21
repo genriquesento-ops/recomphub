@@ -2553,7 +2553,7 @@ function renderCommunityGrid() {
   head.innerHTML = `
     <p>Ports feitos pela comunidade, puxados direto do GitHub: a lista
       <button class="link" data-clink="${esc(data.list_page || '')}">awesome-unofficial-pc-ports</button>
-      e os tópicos <code>pc-port</code> e <code>n64recomp</code>.
+      e os tópicos <code>pc-port</code>, <code>native-port</code>, <code>n64recomp</code>, <code>xenonrecomp</code> e <code>ps3recomp</code>.
       <b>Eles não foram verificados pelo RecompHUB.</b> Os marcados "No catálogo" têm a versão verificada na aba Descobrir.</p>
     <div class="row">
       <button data-cact="refresh" ${communityLoading ? 'disabled' : ''}>${communityLoading ? 'Buscando no GitHub…' : 'Atualizar lista'}</button>
@@ -2582,14 +2582,14 @@ function renderCommunityGrid() {
     <div class="card" data-repo="${esc(i.repo)}">
       <div class="cover"><div class="placeholder">${esc(i.game || i.name)}</div></div>
       <div class="body">
-        <div class="title">${esc(i.name)}</div>
+        <div class="title">${esc(i.game || i.name)}</div>
         <div>
           ${i.console ? `<span class="chip family">${esc(i.console)}</span>` : ''}
           ${i.recommended ? '<span class="chip fav">⭐ Recomendado</span>' : ''}
           ${i.catalog_id ? '<span class="chip ready">No catálogo</span>' : ''}
           ${i.installed_id ? '<span class="chip running">Na biblioteca</span>' : ''}
         </div>
-        <div class="meta">${[i.game && i.game !== i.name ? esc(i.game) : '', i.stars != null ? `★ ${i.stars}` : '', i.pushed ? `atualizado em ${new Date(i.pushed * 1000).toLocaleDateString('pt-BR')}` : ''].filter(Boolean).join(' · ')}</div>
+        <div class="meta">${[i.game && i.game !== i.name ? esc(i.name) : '', i.stars != null ? `★ ${i.stars}` : '', i.pushed ? `atualizado em ${new Date(i.pushed * 1000).toLocaleDateString('pt-BR')}` : ''].filter(Boolean).join(' · ')}</div>
       </div>
     </div>`).join('');
   document.querySelectorAll('#grid .card').forEach((el) => el.addEventListener('click', () => openGame('c:' + el.dataset.repo)));
@@ -2627,12 +2627,26 @@ function renderCommunityItem(repo) {
   } else {
     let files = '';
     if (rel === 'loading') files = '<p class="muted">Procurando a versão para Windows no GitHub…</p>';
-    else if (rel === null) files = '<p>Este projeto não tem um .zip para Windows nos releases. Talvez precise ser compilado: veja a página do projeto.</p>';
-    else if (rel) {
+    else if (rel === null) {
+      files = `<p>Este projeto ainda não publicou nenhuma versão para baixar: por enquanto existe só o código. Para jogar, é
+        preciso compilar seguindo as instruções da página do projeto, ou esperar a primeira versão pronta.</p>
+        <div class="row"><button data-cact="page">Abrir a página do projeto</button></div>`;
+    } else if (rel && !rel.assets.length && rel.installers && rel.installers.length) {
+      files = `
+        <p>A versão <b>${esc(rel.tag)}</b> vem com instalador próprio:</p>
+        <ul class="versions">${rel.installers.map((a) => `<li><span>${esc(a.name)} · ${(a.size / 1048576).toFixed(0)} MB</span></li>`).join('')}</ul>
+        <p class="muted">O RecompHUB não roda instaladores de outros projetos. Baixe e instale pela página de versões; depois use
+          "Adicionar jogo de PC" na biblioteca para ter tempo de jogo, atalhos e backup dos saves.</p>
+        <div class="row"><button data-cact="releases">Abrir a página de versões</button></div>`;
+    } else if (rel && !rel.assets.length) {
+      files = `<p>A versão <b>${esc(rel.tag)}</b> só tem arquivos para outros sistemas (Linux, Mac, Steam Deck…), nenhum para Windows.
+        Veja na página do projeto se há outro jeito de rodar no Windows.</p>
+        <div class="row"><button data-cact="page">Abrir a página do projeto</button></div>`;
+    } else if (rel) {
       files = `
         <p>Versão <b>${esc(rel.tag)}</b>${rel.prerelease ? ' (pré-lançamento)' : ''} · ${new Date(rel.published * 1000).toLocaleDateString('pt-BR')}</p>
         <ul class="versions">${rel.assets.map((a) => `
-          <li><span>${esc(a.name)} · ${(a.size / 1048576).toFixed(0)} MB</span>
+          <li><span>${esc(a.name)} · ${(a.size / 1048576).toFixed(0)} MB${/\.exe$/i.test(a.name) ? ' · programa portátil' : ''}</span>
             <button data-cact="install" data-asset="${esc(a.name)}">Instalar (experimental)</button></li>`).join('')}
         </ul>`;
     }
@@ -2646,8 +2660,8 @@ function renderCommunityItem(repo) {
   $('#detail').innerHTML = `
     <button class="ghost back" data-act="back">← Comunidade</button>
     <div class="covers-page">
-      <h2>${esc(i.name)}</h2>
-      <div class="credit">${i.game ? `${esc(i.game)} · ` : ''}${i.console ? `${esc(i.console)} · ` : ''}
+      <h2>${esc(i.game || i.name)}</h2>
+      <div class="credit">${i.game && i.game !== i.name ? `${esc(i.name)} · ` : ''}${i.console ? `${esc(i.console)} · ` : ''}
         <button class="link" data-cact="page">${esc(i.repo)} no GitHub</button></div>
       <div>
         ${i.recommended ? '<span class="chip fav">⭐ Recomendado pela lista</span>' : ''}
@@ -2660,6 +2674,7 @@ function renderCommunityItem(repo) {
   const on = (sel, fn) => document.querySelectorAll(`#detail [data-cact=${sel}]`).forEach((el) => el.addEventListener('click', () => fn(el)));
   document.querySelector('#detail [data-act=back]').addEventListener('click', () => { openId = null; render(); });
   on('page', () => call('open_link', { url: `https://github.com/${repo}` }));
+  on('releases', () => call('open_link', { url: `https://github.com/${repo}/releases/latest` }));
   on('catalog', () => { tab = 'discover'; openGame(i.catalog_id); });
   on('library', () => openGame(i.installed_id));
   on('release', async () => {

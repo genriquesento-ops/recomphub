@@ -25,6 +25,7 @@
 - [x] **v0.21** Seu PC: aviso de compatibilidade por port (processador, vídeo, driver, Windows, Visual C++), placa de vídeo e API gráfica por jogo, antivírus explicado; variáveis de ambiente também no modo administrador
 - [x] **v0.22** Contador de FPS por cima do jogo (PresentMon da Intel, permissão de administrador uma única vez)
 - [x] **v0.23** God of War III no SpartanPort (nome novo, instalações antigas mantidas, exigência de CPU corrigida para só AVX) e cache de shaders na página do jogo
+- [x] **v0.24** Comunidade: .7z e .exe portátil, instaladores explicados, nome do jogo nos cartões (inFAMOUS, The Last Guardian…), tópicos native-port, xenonrecomp e ps3recomp
 - [x] Repositório público (MIT) na organização `recomphub-app`, com site no GitHub Pages; a situação atual está em `HANDOFF.md`
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 
