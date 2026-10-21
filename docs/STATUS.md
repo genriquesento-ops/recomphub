@@ -21,6 +21,7 @@
 - [x] **v0.17** Jogos que exigem administrador abrem pelo pedido de permissão do Windows (UAC); opção "Abrir como administrador" por jogo
 - [x] **v0.18** Central de Mods (Thunderstore) para Majora's Mask e Banjo: instalar com dependências, ligar e desligar, atualizar, desinstalar, mods por perfil, coleções
 - [x] **v0.19** Token do GitHub (5.000 consultas por hora), Adicionar à Steam (jogo não Steam com capa), "Pular esta versão", limite de tamanho nos pacotes de mods
+- [x] **v0.20** Visual novo do programa, no estilo de manual do site (tema escuro, um vermelho, linhas finas, Archivo nos títulos)
 - [x] Repositório público (MIT) na organização `recomphub-app`, com site no GitHub Pages; a situação atual está em `HANDOFF.md`
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 

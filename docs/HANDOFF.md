@@ -5,8 +5,7 @@ feito, o que deu errado e o que falta.
 
 ## Onde estamos
 
-- **Versão publicada:** v0.19.0 (Release no GitHub, 21/10/2026), testada pelo Gustavo antes.
-- **No main, ainda sem versão:** o visual novo do programa (estilo manual, igual ao site), feito em outra sessão.
+- **Versão publicada:** v0.20.0 (21/10/2026): visual novo do programa, igual ao site. A v0.19.0 trouxe Steam, token do GitHub, pular versão e limite nos mods.
 - **Repositório:** público, licença MIT, na organização `recomphub-app`:
   https://github.com/recomphub-app/recomphub (o Gustavo é administrador).
 - **Site:** https://recomphub-app.github.io/recomphub/ (GitHub Pages; fica no ar com o PC desligado).
@@ -38,6 +37,7 @@ Erros de compilação só aparecem no CI: `gh run view --log-failed`.
 | v0.17 | Jogos que exigem administrador abrem pelo pedido de permissão do Windows (UAC); opção por jogo |
 | v0.18.0 | Central de Mods (Thunderstore) para Majora's Mask e Banjo: dependências, ligar/desligar, mods por perfil, coleções |
 | v0.18.1 | Projeto movido para a organização `recomphub-app`; aviso de versão e catálogo remoto apontam para lá |
+| v0.20.0 | Visual novo do programa no estilo de manual do site (tema escuro, um vermelho, linhas finas, fonte Archivo embutida) |
 | v0.19.0 | Token do GitHub (5.000 consultas por hora), Adicionar à Steam (jogo não Steam com capa), "Pular esta versão", limite de tamanho nos mods. Ideias do GithubLauncher; revisão pelo Codex |
 
 Fora do programa:
@@ -69,7 +69,7 @@ Fora do programa:
 
 ## O que falta
 
-1. **Testar o visual novo do programa** (commit `ca2e1ab` em diante) e, se estiver bom, lançar como v0.20.0.
+1. **Ouvir o retorno de quem usa** a 0.19 e a 0.20 e corrigir o que aparecer.
    perfis, backup automático, conquistas do Banjo (aviso por cima do jogo), Central de Mods e um jogo
    que exige administrador.
 2. **Chave Pix** em `site/doacoes.json` (`pix.chave` e `pix.nome`). A chave fica pública: usar chave
