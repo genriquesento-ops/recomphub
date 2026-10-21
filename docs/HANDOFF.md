@@ -5,9 +5,8 @@ feito, o que deu errado e o que falta.
 
 ## Onde estamos
 
-- **Versão publicada:** v0.18.1 (Release no GitHub).
-- **Versão pronta, ainda não publicada:** v0.19.0. O código está no main, o build e os 57 testes passaram, e o
-  instalador está em `Desktop\calude\instalador`. Falta testar no Windows e criar a tag `v0.19.0` para publicar.
+- **Versão publicada:** v0.19.0 (Release no GitHub, 21/10/2026), testada pelo Gustavo antes.
+- **No main, ainda sem versão:** o visual novo do programa (estilo manual, igual ao site), feito em outra sessão.
 - **Repositório:** público, licença MIT, na organização `recomphub-app`:
   https://github.com/recomphub-app/recomphub (o Gustavo é administrador).
 - **Site:** https://recomphub-app.github.io/recomphub/ (GitHub Pages; fica no ar com o PC desligado).
@@ -70,7 +69,7 @@ Fora do programa:
 
 ## O que falta
 
-1. **Gustavo testar a v0.19.0 no Windows** e, se estiver tudo bem, publicar com a tag `v0.19.0`. Prioridade nova: Adicionar à Steam (com a Steam fechada), token do GitHub e Pular esta versão. Também testar o que veio antes, e contar o que deu errado. Prioridade: arrastar a ROM,
+1. **Testar o visual novo do programa** (commit `ca2e1ab` em diante) e, se estiver bom, lançar como v0.20.0.
    perfis, backup automático, conquistas do Banjo (aviso por cima do jogo), Central de Mods e um jogo
    que exige administrador.
 2. **Chave Pix** em `site/doacoes.json` (`pix.chave` e `pix.nome`). A chave fica pública: usar chave
