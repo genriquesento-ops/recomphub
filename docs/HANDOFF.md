@@ -6,7 +6,7 @@ feito, o que deu errado e o que falta.
 ## Onde estamos
 
 - **Versão publicada:** v0.20.0 (21/10/2026), visual novo do programa.
-- **Prontas no main, ainda não publicadas (o Gustavo testa antes):** 0.20.1 (variáveis de ambiente no modo administrador), 0.21.0 (Seu PC: compatibilidade, placa de vídeo, API gráfica, antivírus), 0.22.0 (contador de FPS com PresentMon), 0.23.0 (God of War III como SpartanPort e cache de shaders). O instalador mais novo é o da 0.23.0.
+- **Prontas no main, ainda não publicadas (o Gustavo testa antes):** 0.20.1 (variáveis de ambiente no modo administrador), 0.21.0 (Seu PC: compatibilidade, placa de vídeo, API gráfica, antivírus), 0.22.0 (contador de FPS com PresentMon), 0.23.0 (God of War III como SpartanPort e cache de shaders), 0.24.0 (Comunidade: .7z, .exe portátil, nome do jogo nos cartões, tópicos novos). O instalador mais novo é o da 0.24.0.
 - **Catálogo remoto:** a revisão 6 já está no ar para todos (o God of War III aponta para o SpartanPort).
 - **Repositório:** público, licença MIT, na organização `recomphub-app`:
   https://github.com/recomphub-app/recomphub (o Gustavo é administrador).
