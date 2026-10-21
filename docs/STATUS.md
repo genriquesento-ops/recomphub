@@ -20,6 +20,7 @@
 - [x] **v0.16** Fase 5: RetroAchievements só leitura, por perfil, jogo achado pelo MD5 da ROM
 - [x] **v0.17** Jogos que exigem administrador abrem pelo pedido de permissão do Windows (UAC); opção "Abrir como administrador" por jogo
 - [x] **v0.18** Central de Mods (Thunderstore) para Majora's Mask e Banjo: instalar com dependências, ligar e desligar, atualizar, desinstalar, mods por perfil, coleções
+- [x] **v0.19** Token do GitHub (5.000 consultas por hora), Adicionar à Steam (jogo não Steam com capa), "Pular esta versão", limite de tamanho nos pacotes de mods
 - [x] Repositório público (MIT) na organização `recomphub-app`, com site no GitHub Pages; a situação atual está em `HANDOFF.md`
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 
@@ -42,6 +43,9 @@ Rodam no GitHub Actions antes de gerar o instalador (`cargo test --lib`):
 | RetroAchievements | Jogo achado pelo hash da ROM; progresso lido na ordem de exibição; nome de ícone não sai da pasta |
 | Central de Mods | Lista da Thunderstore só com downloads da Thunderstore; dependências antes e ciclos param; só .nrm/.rtz saem do pacote; id e jogo lidos do .nrm; mods.json preserva o que o port escreveu; dependências órfãs |
 | Instalação | A pasta única no topo do .zip é removida; zip plano fica como está |
+| Limites dos mods | Pacote no limite passa; arquivo ou pacote acima é recusado e a pasta temporária some |
+| Token do GitHub | Formato do token; o token só vai para api.github.com, nunca para downloads ou endereços parecidos |
+| Steam | CRC igual ao padrão; atalhos existentes regravados byte a byte; clicar de novo atualiza sem duplicar e mantém o id; arquivo quebrado ou com dados sobrando é recusado |
 | Outros | Argumentos com aspas, nomes de variáveis, nomes de atalho, datas, comparação de versões |
 
 ## Regras de trabalho

@@ -54,6 +54,9 @@ pub struct Settings {
     pub achievement_overlay: bool,
     #[serde(default = "yes")]
     pub achievement_sound: bool,
+    /// The player's GitHub personal access token, for more API requests per hour.
+    #[serde(default)]
+    pub github_token: String,
 }
 
 fn ten() -> u32 {
@@ -79,6 +82,7 @@ impl Default for Settings {
             ludusavi_auto: false,
             achievement_overlay: true,
             achievement_sound: true,
+            github_token: String::new(),
         }
     }
 }

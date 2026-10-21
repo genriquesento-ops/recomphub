@@ -22,6 +22,10 @@ const API: &str = "https://thunderstore.io/c/";
 pub const LIST_MAX_AGE: u64 = 6 * 3600;
 /// File types RecompHUB copies into the mods folder.
 const MOD_EXTS: &[&str] = &["nrm", "rtz"];
+/// Biggest mod file and biggest package taken from a download, so a broken or hostile .zip
+/// cannot fill the disk. The largest texture packs on Thunderstore are well below this.
+pub const MAX_MOD_FILE: u64 = 512 * 1024 * 1024;
+pub const MAX_MOD_PACKAGE: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn valid_community(s: &str) -> bool {
     !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
@@ -241,6 +245,22 @@ pub fn nrm_manifest(bytes: &[u8]) -> Option<(String, String)> {
 /// packs can be several GB) and returns their names. Folders inside the zip are flattened;
 /// names are checked so nothing lands outside the folder; manifest, icon and README stay out.
 pub fn extract<R: std::io::Read + std::io::Seek>(reader: R, staging: &Path) -> Result<Vec<String>, String> {
+    extract_limited(reader, staging, MAX_MOD_FILE, MAX_MOD_PACKAGE)
+}
+
+/// As `extract`, with the limits as arguments. A package over a limit is refused and what was
+/// already copied is removed: nothing half-written stays behind looking like a whole mod.
+pub fn extract_limited<R: std::io::Read + std::io::Seek>(reader: R, staging: &Path, per_file: u64, total: u64) -> Result<Vec<String>, String> {
+    let result = extract_into(reader, staging, per_file, total);
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(staging);
+    }
+    result
+}
+
+fn extract_into<R: std::io::Read + std::io::Seek>(reader: R, staging: &Path, per_file: u64, total: u64) -> Result<Vec<String>, String> {
+    let mb = |n: u64| n / (1024 * 1024);
+    let mut used: u64 = 0;
     let mut z = zip::ZipArchive::new(reader).map_err(|_| "O pacote baixado não é um .zip válido.".to_string())?;
     std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
     let mut out: Vec<String> = Vec::new();
@@ -258,8 +278,19 @@ pub fn extract<R: std::io::Read + std::io::Seek>(reader: R, staging: &Path) -> R
         if out.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
             return Err(format!("O pacote tem dois arquivos chamados {name}."));
         }
+        // The size in the .zip header can lie, so the bytes actually copied are counted. One
+        // byte more than the limit is read to tell "exactly the limit" from "over it".
+        let room = per_file.min(total - used);
         let mut file = std::fs::File::create(staging.join(&name)).map_err(|e| e.to_string())?;
-        std::io::copy(&mut e, &mut file).map_err(|err| format!("O pacote está danificado: {err}"))?;
+        let copied = std::io::copy(&mut (&mut e).take(room + 1), &mut file).map_err(|err| format!("O pacote está danificado: {err}"))?;
+        if copied > room {
+            return Err(if room == per_file {
+                format!("{name} passa de {} MB, o limite do RecompHUB para um arquivo de mod. O pacote não foi instalado.", mb(per_file))
+            } else {
+                format!("O pacote passa de {} MB no total, o limite do RecompHUB. Ele não foi instalado.", mb(total))
+            });
+        }
+        used += copied;
         out.push(name);
     }
     Ok(out)
@@ -438,6 +469,22 @@ mod tests {
         assert_eq!(nrm_manifest(&nrm), Some(("mm_recomp_draw_distance".into(), "mm".into())));
         assert_eq!(nrm_manifest_file(&staging.join(&files[0])), Some(("mm_recomp_draw_distance".into(), "mm".into())));
         let _ = std::fs::remove_dir_all(&staging);
+    }
+
+    #[test]
+    fn oversized_packages_are_refused_and_cleaned() {
+        let pkg = zip_of(&[("a.nrm", &[1u8; 100][..]), ("b.nrm", &[2u8; 100][..])]);
+        let staging = std::env::temp_dir().join(format!("recomphub-modlimit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&staging);
+        // Exactly at the limits: accepted.
+        assert_eq!(extract_limited(std::io::Cursor::new(pkg.clone()), &staging, 100, 200).unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(&staging);
+        // One file over the per-file limit.
+        assert!(extract_limited(std::io::Cursor::new(pkg.clone()), &staging, 99, 1000).unwrap_err().contains("a.nrm"));
+        assert!(!staging.exists());
+        // Second file pushes the package over the total.
+        assert!(extract_limited(std::io::Cursor::new(pkg), &staging, 100, 150).unwrap_err().contains("no total"));
+        assert!(!staging.exists());
     }
 
     #[test]

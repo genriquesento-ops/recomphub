@@ -49,6 +49,10 @@ pub struct Entry {
     /// the player picks an older version, so it is not swapped back behind their back.
     #[serde(default)]
     pub ignore_updates: bool,
+    /// "Pular esta versão": no notice for this release tag; the next one is shown again (as
+    /// GithubLauncher's SkippedUpdateVersion). Cleared on install.
+    #[serde(default)]
+    pub skipped_version: Option<String>,
     /// Shown first in the library.
     #[serde(default)]
     pub favorite: bool,
@@ -136,6 +140,7 @@ impl Library {
         let mut entry = self.games.remove(id).or_else(|| self.removed.remove(id)).unwrap_or_default();
         entry.install_dir = install_dir.display().to_string();
         entry.version = version;
+        entry.skipped_version = None;
         self.games.insert(id.to_string(), entry);
     }
 
@@ -156,6 +161,7 @@ impl Library {
         entry.repo = Some(repo.to_string());
         entry.title = Some(title.to_string());
         entry.version = Some(tag.to_string());
+        entry.skipped_version = None;
         // An update keeps the program the player chose, when it still exists.
         if entry.exe.as_ref().map(|e| !dir.join(e).is_file()).unwrap_or(true) {
             entry.exe = exe;

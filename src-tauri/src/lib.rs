@@ -17,6 +17,7 @@ mod profiles;
 mod ra;
 mod saves;
 mod shortcut;
+mod steam;
 mod tray;
 
 use base64::Engine;
@@ -106,6 +107,8 @@ struct GameView {
     update_available: bool,
     /// The player turned off "versão nova" notices for this port.
     ignore_updates: bool,
+    /// Release tag the player chose to skip.
+    skipped_version: Option<String>,
     /// Installed by RecompHUB (it may uninstall it), not added from the player's folder.
     installed_by_hub: bool,
     /// Saves kept from an uninstall, waiting for the next install.
@@ -132,13 +135,17 @@ struct GameView {
 }
 
 /// The cover shown for a game, in order: the player's choice, their own files, a download.
-fn pick_cover(state: &AppState, id: &str, own: Option<PathBuf>) -> (Option<String>, Option<&'static str>) {
-    let found = covers::find(&state.covers.custom, id)
+/// The cover shown for a game, in order of preference, and where it came from.
+fn cover_file(state: &AppState, id: &str, own: Option<PathBuf>) -> Option<(PathBuf, &'static str)> {
+    covers::find(&state.covers.custom, id)
         .map(|p| (p, "custom"))
         .or_else(|| own.map(|p| (p, "own_files")))
         .or_else(|| covers::find(&state.covers.downloaded, id).map(|p| (p, "downloaded")))
-        .or_else(|| meta::image(&state.meta_dir, id, "cover").map(|p| (p, "api")));
-    match found {
+        .or_else(|| meta::image(&state.meta_dir, id, "cover").map(|p| (p, "api")))
+}
+
+fn pick_cover(state: &AppState, id: &str, own: Option<PathBuf>) -> (Option<String>, Option<&'static str>) {
+    match cover_file(state, id, own) {
         Some((p, source)) => (data_url(&p), Some(source)),
         None => (None, None),
     }
@@ -176,7 +183,7 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
     let files = dir.as_deref().filter(|_| installed).map(|d| files::status(game, d));
 
     let update_available = match (&entry, &latest, installed) {
-        (Some(e), Some(l), true) if !e.ignore_updates => match &e.version {
+        (Some(e), Some(l), true) if !e.ignore_updates && e.skipped_version.as_ref() != Some(&l.tag) => match &e.version {
             Some(v) => v != &l.tag,
             // Added from a folder: newer if the release came out a day after the copy's program.
             None => modified(&dir.as_ref().unwrap().join(&game.exe))
@@ -233,6 +240,7 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         cover_source,
         icon: None,
         ignore_updates: entry.as_ref().map(|e| e.ignore_updates).unwrap_or(false),
+        skipped_version: entry.as_ref().and_then(|e| e.skipped_version.clone()),
         installed_by_hub: entry.as_ref().map(|e| e.version.is_some() && Path::new(&e.install_dir).starts_with(&state.games_root)).unwrap_or(false),
         pending_saves: state.pending_root.join(&game.id).is_dir(),
         favorite: entry.as_ref().map(|e| e.favorite).unwrap_or(false),
@@ -298,6 +306,7 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         update_available: !entry.ignore_updates
             && latest.is_some()
             && latest != entry.version
+            && latest != entry.skipped_version
             && !matches!(status, "installing" | "running" | "starting"),
         latest_version: latest,
         files: None,
@@ -307,6 +316,7 @@ fn view_pc(state: &AppState, id: &str, entry: &library::Entry) -> GameView {
         cover_source,
         icon: covers::find(&state.covers.icons, id).and_then(|p| data_url(&p)),
         ignore_updates: entry.ignore_updates,
+        skipped_version: entry.skipped_version.clone(),
         installed_by_hub,
         pending_saves: state.pending_root.join(id).is_dir(),
         favorite: entry.favorite,
@@ -827,6 +837,7 @@ struct AppSettings {
     /// Only whether keys are saved; the keys themselves never go back to the page.
     has_steamgriddb: bool,
     has_igdb: bool,
+    has_github_token: bool,
     sgdb_key_page: &'static str,
     igdb_key_page: &'static str,
 }
@@ -841,6 +852,7 @@ fn get_settings(app: AppHandle) -> AppSettings {
         version: env!("CARGO_PKG_VERSION"),
         has_steamgriddb: !keys.sgdb.is_empty(),
         has_igdb: keys.igdb(),
+        has_github_token: !s.github_token.is_empty(),
         sgdb_key_page: meta::SGDB_KEY_PAGE,
         igdb_key_page: meta::IGDB_KEY_PAGE,
     }
@@ -881,6 +893,27 @@ async fn set_api_keys(
         s.keys()
     };
     Ok(meta::test(&keys).await.into_iter().map(|(ok, message)| KeyTest { ok, message }).collect())
+}
+
+/// "Salvar e testar" of the GitHub token: tested before it is saved. `clear` forgets it.
+#[tauri::command]
+async fn set_github_token(app: AppHandle, token: String, clear: bool) -> Result<String, String> {
+    let token = if clear { String::new() } else { token.trim().to_string() };
+    if !clear && !github::valid_token(&token) {
+        return Err("Isso não parece um token do GitHub. Ele começa com ghp_ ou github_pat_; copie de novo da página do GitHub.".into());
+    }
+    let message = if clear {
+        "Token apagado. O RecompHUB volta a usar o limite de 60 consultas por hora.".to_string()
+    } else {
+        let (remaining, limit) = github::rate_limit(&token).await?;
+        format!("Token funcionando: {remaining} de {limit} consultas por hora disponíveis.")
+    };
+    let state = app.state::<AppState>();
+    let mut s = state.settings.lock().unwrap();
+    s.github_token = token;
+    s.save(&state.settings_path)?;
+    github::set_token(&s.github_token);
+    Ok(message)
 }
 
 /// What the game page shows from SteamGridDB and IGDB.
@@ -1033,9 +1066,7 @@ async fn check_app_update() -> Option<AppUpdate> {
         tag_name: String,
         html_url: String,
     }
-    let resp = github::client()
-        .get(format!("https://api.github.com/repos/{APP_REPO}/releases/latest"))
-        .header("Accept", "application/vnd.github+json")
+    let resp = github::api(&format!("https://api.github.com/repos/{APP_REPO}/releases/latest"))
         .send()
         .await
         .ok()?;
@@ -1224,6 +1255,20 @@ async fn list_versions(id: String) -> Result<Vec<VersionInfo>, String> {
 fn set_ignore_updates(app: AppHandle, id: String, ignore: bool) -> Result<GameView, String> {
     let state = app.state::<AppState>();
     state.library.lock().unwrap().games.get_mut(&id).ok_or("Jogo fora da biblioteca.")?.ignore_updates = ignore;
+    save(&state)?;
+    view_any(&state, &id)
+}
+
+/// "Pular esta versão" (`skip`) or "Avisar de novo". Skips the newest release known now.
+#[tauri::command]
+fn skip_update(app: AppHandle, id: String, skip: bool) -> Result<GameView, String> {
+    let state = app.state::<AppState>();
+    let latest = state.latest.lock().unwrap().get(&id).map(|r| r.tag.clone());
+    if skip && latest.is_none() {
+        return Err("Ainda não sei qual é a versão nova. Clique em Verificar atualizações e tente de novo.".into());
+    }
+    state.library.lock().unwrap().games.get_mut(&id).ok_or("Jogo fora da biblioteca.")?.skipped_version =
+        if skip { latest } else { None };
     save(&state)?;
     view_any(&state, &id)
 }
@@ -2723,20 +2768,11 @@ fn open_saves(app: AppHandle, id: String) -> Result<(), String> {
     app.opener().open_path(saves.display().to_string(), None::<&str>).map_err(|e| e.to_string())
 }
 
-/// `location`: "desktop" or "start_menu".
-#[tauri::command]
-fn create_shortcut(app: AppHandle, id: String, location: String) -> Result<String, String> {
-    let entry = app.state::<AppState>().library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
+/// The name and icon a shortcut to the game gets.
+fn shortcut_target(app: &AppHandle, id: &str) -> Result<(String, PathBuf), String> {
+    let entry = app.state::<AppState>().library.lock().unwrap().games.get(id).cloned().ok_or("Jogo fora da biblioteca.")?;
     let dir = PathBuf::from(&entry.install_dir);
-    let folder = match location.as_str() {
-        "desktop" => app.path().desktop_dir().map_err(|e| e.to_string())?,
-        _ => app
-            .path()
-            .data_dir()
-            .map_err(|e| e.to_string())?
-            .join("Microsoft\\Windows\\Start Menu\\Programs\\RecompHUB"),
-    };
-    let (title, icon) = match catalog::get(&id) {
+    Ok(match catalog::get(id) {
         Some(game) => {
             let icon = Some(dir.join(&game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(&game.exe));
             (game.title.to_string(), icon)
@@ -2746,6 +2782,47 @@ fn create_shortcut(app: AppHandle, id: String, location: String) -> Result<Strin
             entry.title.clone().unwrap_or_else(|| "Jogo".into()),
             pc_exe(&entry).ok_or("Jogo sem programa definido.")?,
         ),
+    })
+}
+
+/// "Adicionar à Steam": a non-Steam shortcut that opens the game through RecompHUB, with the
+/// game's cover and banner as its artwork.
+#[tauri::command]
+async fn add_to_steam(app: AppHandle, id: String) -> Result<String, String> {
+    // The id goes into the shortcut's launch options, so only plain ids are accepted.
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("Jogo inválido.".into());
+    }
+    let (title, icon) = shortcut_target(&app, &id)?;
+    let (cover, banner) = {
+        let state = app.state::<AppState>();
+        let dir = state.library.lock().unwrap().games.get(&id).map(|e| PathBuf::from(&e.install_dir));
+        let own = catalog::get(&id).and_then(|g| files::cover(g, dir.as_deref()));
+        let cover = cover_file(&state, &id, own).map(|(p, _)| p);
+        let banner = meta::image(&state.meta_dir, &id, "banner");
+        (cover, banner)
+    };
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let sc = steam::Shortcut { name: title.clone(), exe, icon, launch_options: format!("--play {id}") };
+    let added = tauri::async_runtime::spawn_blocking(move || steam::add(&sc, cover.as_deref(), banner.as_deref()))
+        .await
+        .map_err(|e| e.to_string())??;
+    let what = if added.updated { "O atalho da Steam foi atualizado" } else { "Pronto: o jogo foi adicionado à Steam" };
+    let art = if added.art { ", com capa" } else { "" };
+    Ok(format!("{what}{art}. Abra a Steam e procure por {title} na biblioteca."))
+}
+
+/// `location`: "desktop" or "start_menu".
+#[tauri::command]
+fn create_shortcut(app: AppHandle, id: String, location: String) -> Result<String, String> {
+    let (title, icon) = shortcut_target(&app, &id)?;
+    let folder = match location.as_str() {
+        "desktop" => app.path().desktop_dir().map_err(|e| e.to_string())?,
+        _ => app
+            .path()
+            .data_dir()
+            .map_err(|e| e.to_string())?
+            .join("Microsoft\\Windows\\Start Menu\\Programs\\RecompHUB"),
     };
     shortcut::create(&folder, &title, &id, &icon).map(|p| p.display().to_string())
 }
@@ -2855,6 +2932,7 @@ pub fn run() {
                 installing: Mutex::new(HashSet::new()),
                 pending_open: Mutex::new(None),
             });
+            github::set_token(&app.state::<AppState>().settings.lock().unwrap().github_token);
             play::spawn_watcher(app.handle().clone());
             tray::build(app.handle())?;
             let args: Vec<String> = std::env::args().collect();
@@ -2870,6 +2948,8 @@ pub fn run() {
             provide_files,
             find_rom_in_downloads,
             set_api_keys,
+            set_github_token,
+            add_to_steam,
             game_meta,
             fetch_meta_all,
             set_completion,
@@ -2925,6 +3005,7 @@ pub fn run() {
             list_executables,
             set_executable,
             set_ignore_updates,
+            skip_update,
             reset_playtime,
             uninstall_game,
             backup_saves,

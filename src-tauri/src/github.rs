@@ -35,6 +35,83 @@ struct ApiAsset {
     browser_download_url: String,
 }
 
+/// The player's personal access token (Configurações), empty for none. Without it GitHub allows
+/// 60 API requests an hour per PC; with it, 5,000 (as GithubLauncher's GitHubApiToken).
+static TOKEN: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
+pub fn set_token(token: &str) {
+    *TOKEN.write().unwrap() = token.to_string();
+}
+
+/// Classic tokens are "ghp_" plus 36 characters, fine-grained ones "github_pat_" plus about 80.
+pub fn valid_token(token: &str) -> bool {
+    (20..=255).contains(&token.len()) && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+const API: &str = "https://api.github.com/";
+
+/// A GET to the GitHub API. The token goes only to api.github.com, never to download hosts
+/// or other sites.
+pub fn api(url: &str) -> reqwest::RequestBuilder {
+    let token = TOKEN.read().unwrap().clone();
+    api_with(url, &token)
+}
+
+fn api_with(url: &str, token: &str) -> reqwest::RequestBuilder {
+    let req = client()
+        .get(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28");
+    if !token.is_empty() && url.starts_with(API) {
+        req.bearer_auth(token)
+    } else {
+        req
+    }
+}
+
+/// The message for an API answer that is not 200.
+pub fn status_error(status: reqwest::StatusCode) -> String {
+    match status.as_u16() {
+        401 => "O GitHub recusou o token guardado. Confira ou apague o token em Configurações.".into(),
+        403 | 429 if TOKEN.read().unwrap().is_empty() => {
+            "O GitHub limitou as consultas por agora (60 por hora sem token). Tente mais tarde ou coloque um token do GitHub em Configurações.".into()
+        }
+        403 | 429 => "O GitHub limitou as consultas por agora. Tente de novo mais tarde.".into(),
+        404 => "O repositório não existe mais ou ficou privado.".into(),
+        s => format!("O GitHub respondeu {s}"),
+    }
+}
+
+/// Requests left this hour and the hourly limit, for "Salvar e testar". `token` is the one
+/// being tested, before it is saved.
+pub async fn rate_limit(token: &str) -> Result<(u64, u64), String> {
+    #[derive(Deserialize)]
+    struct Core {
+        limit: u64,
+        remaining: u64,
+    }
+    #[derive(Deserialize)]
+    struct Resources {
+        core: Core,
+    }
+    #[derive(Deserialize)]
+    struct Answer {
+        resources: Resources,
+    }
+    let resp = api_with(&format!("{API}rate_limit"), token)
+        .send()
+        .await
+        .map_err(|e| format!("Sem conexão com o GitHub ({e})"))?;
+    match resp.status().as_u16() {
+        200 => {
+            let a: Answer = resp.json().await.map_err(|e| e.to_string())?;
+            Ok((a.resources.core.remaining, a.resources.core.limit))
+        }
+        401 => Err("O GitHub não aceitou esse token. Ele pode ter vencido ou sido copiado pela metade.".into()),
+        s => Err(format!("O GitHub respondeu {s}")),
+    }
+}
+
 pub fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent(concat!("RecompHUB/", env!("CARGO_PKG_VERSION")))
@@ -53,15 +130,10 @@ pub async fn latest(game: &GameDef) -> Result<Release, String> {
 
 /// Up to `max` stable releases with a Windows build, newest first ("Escolher versão").
 pub async fn releases(game: &GameDef, max: usize) -> Result<Vec<Release>, String> {
-    let url = format!("https://api.github.com/repos/{}/releases?per_page=20", game.repo);
-    let resp = client()
-        .get(&url)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| format!("Sem conexão com o GitHub ({e})"))?;
+    let url = format!("{API}repos/{}/releases?per_page=20", game.repo);
+    let resp = api(&url).send().await.map_err(|e| format!("Sem conexão com o GitHub ({e})"))?;
     if !resp.status().is_success() {
-        return Err(format!("O GitHub respondeu {}", resp.status()));
+        return Err(status_error(resp.status()));
     }
     let api: Vec<ApiRelease> = resp.json().await.map_err(|e| e.to_string())?;
     let mut out = Vec::new();
@@ -111,5 +183,23 @@ mod tests {
         assert_eq!(super::parse_time("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(super::parse_time("2026-10-18T06:10:15Z"), Some(1_792_303_815));
         assert_eq!(super::parse_time("ontem"), None);
+    }
+
+    #[test]
+    fn tokens() {
+        assert!(super::valid_token("ghp_0123456789abcdefABCDEF0123456789abcd"));
+        assert!(super::valid_token(&format!("github_pat_{}", "A1_b".repeat(20))));
+        assert!(!super::valid_token("ghp_curto"));
+        assert!(!super::valid_token("ghp_0123456789 abcdef0123456789abcdef"));
+        assert!(!super::valid_token("ghp_0123456789abcdef0123456789abcdef\nX-Evil: 1"));
+    }
+
+    #[test]
+    fn token_goes_only_to_the_api() {
+        let with = |url: &str| super::api_with(url, "ghp_teste").build().unwrap().headers().contains_key("authorization");
+        assert!(with("https://api.github.com/repos/a/b/releases"));
+        assert!(!with("https://github.com/a/b/releases/download/v1/x.zip"));
+        assert!(!with("https://api.github.com.evil.example/x"));
+        assert!(!with("https://thunderstore.io/api/v1/package/"));
     }
 }

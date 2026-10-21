@@ -277,14 +277,23 @@ function playRow(g, what) {
     </div>`;
 }
 
+// After "Pular esta versão": which one was skipped, and the way back.
+function skippedNote(g) {
+  if (!g.skipped_version || g.update_available) return '';
+  return `<p class="muted">Você pulou a versão ${esc(g.skipped_version)}. O RecompHUB avisa de novo quando sair uma mais nova.
+    <button class="link" data-act="unskip-update">Avisar desta também</button></p>`;
+}
+
 function shortcutsRow(g) {
   return `
     <div class="row">
       <button class="ghost" data-act="shortcut-desktop">Atalho na área de trabalho</button>
       <button class="ghost" data-act="shortcut-start">Atalho no menu Iniciar</button>
+      <button class="ghost" data-act="steam-add">Adicionar à Steam</button>
       ${g.kind === 'port' ? '<button class="ghost" data-act="saves">Abrir pasta de saves</button>' : ''}
     </div>
-    <p class="muted">Os atalhos abrem o jogo pelo RecompHUB, então o tempo de jogo continua sendo contado.</p>`;
+    <p class="muted">Os atalhos abrem o jogo pelo RecompHUB, então o tempo de jogo continua sendo contado. Na Steam o jogo
+      aparece como "jogo não Steam", funciona no Big Picture e usa a configuração de controle da Steam. Feche a Steam antes.</p>`;
 }
 
 function renderPcDetail(g) {
@@ -1338,6 +1347,29 @@ function keysBox() {
     </div>`;
 }
 
+let ghTokenResult = null;   // last "Salvar e testar" of the GitHub token
+
+function githubTokenBox() {
+  const result = ghTokenResult ? `<p class="${ghTokenResult.ok ? 'ok-text' : 'bad-text'}">${esc(ghTokenResult.message)}</p>` : '';
+  return `
+    <div class="box">
+      <h3>Token do GitHub (opcional)</h3>
+      <p>Sem login, o GitHub responde 60 consultas por hora para cada PC. Quem tem muitos jogos ou usa bastante a aba
+        Comunidade pode chegar nesse limite. Com um token seu, ele sobe para 5.000 por hora.</p>
+      <p>${settings.has_github_token ? '<span class="chip ready">token guardado</span>' : '<span class="chip">sem token</span>'}
+        <button class="link" data-act="link" data-url="https://github.com/settings/tokens/new?description=RecompHUB">criar um token no GitHub</button></p>
+      <p class="muted">Na página do GitHub, escolha a validade e clique em Generate token sem marcar nenhuma permissão:
+        o RecompHUB só lê páginas públicas.</p>
+      <input type="password" id="gh-token" class="wide" autocomplete="off" placeholder="${settings.has_github_token ? 'Deixe vazio para manter o token guardado' : 'ghp_… ou github_pat_…'}">
+      <div class="row">
+        <button data-act="gh-token-save">Salvar e testar</button>
+        ${settings.has_github_token ? '<button class="ghost danger" data-act="gh-token-clear">Apagar o token</button>' : ''}
+      </div>
+      ${result}
+      <p class="muted">O token fica só neste PC e só é enviado para a API do GitHub. Não mostre para ninguém.</p>
+    </div>`;
+}
+
 let backupSettings = null;   // loaded when Configurações opens
 
 function backupSettingsBox() {
@@ -1383,6 +1415,7 @@ function renderSettings() {
       ${achievementSettingsBox()}
       ${backupSettingsBox()}
       ${keysBox()}
+      ${githubTokenBox()}
       <p class="muted">RecompHUB versão ${esc(settings.version)}.</p>
     </div>`;
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
@@ -1471,9 +1504,11 @@ function renderPortDetail(g) {
         <div class="box warn">
           <h3>Versão nova disponível${latest ? `: ${esc(latest)}` : ''}</h3>
           <p>Seus saves e configurações são mantidos.</p>
-          <div class="row"><button data-act="install" ${IN_GAME.includes(g.status) ? 'disabled' : ''}>Atualizar</button></div>
+          <div class="row"><button data-act="install" ${IN_GAME.includes(g.status) ? 'disabled' : ''}>Atualizar</button>
+            <button class="ghost" data-act="skip-update">Pular esta versão</button></div>
         </div>`;
     }
+    main += skippedNote(g);
     main += playRow(g, 'o port');
     main += filesBox(g);
     main += modsBox(g);
@@ -1785,6 +1820,26 @@ async function act(action, g, el) {
       render();
       break;
     }
+    case 'gh-token-save':
+    case 'gh-token-clear': {
+      const clear = action === 'gh-token-clear';
+      if (clear && !confirm('Apagar o token do GitHub deste PC?')) break;
+      const token = clear ? '' : $('#gh-token').value.trim();
+      if (!clear && !token) {
+        ghTokenResult = { ok: false, message: settings.has_github_token ? 'O token guardado continua. Para trocar, cole o novo.' : 'Cole o token primeiro.' };
+        render();
+        break;
+      }
+      el.disabled = true;
+      try {
+        ghTokenResult = { ok: true, message: await invoke('set_github_token', { token, clear }) };
+        settings = await call('get_settings');
+      } catch (e) {
+        ghTokenResult = { ok: false, message: String(e) };
+      }
+      render();
+      break;
+    }
     case 'meta-all': {
       el.disabled = true;
       el.textContent = 'Buscando…';
@@ -2017,6 +2072,20 @@ async function act(action, g, el) {
     case 'versions-close':
       delete versions[g.id];
       render();
+      break;
+    case 'steam-add': {
+      el.disabled = true;
+      try {
+        toast(await invoke('add_to_steam', { id: g.id }));
+      } catch (e) {
+        toast(String(e), true);
+      }
+      el.disabled = false;
+      break;
+    }
+    case 'skip-update':
+    case 'unskip-update':
+      setGame(await call('skip_update', { id: g.id, skip: action === 'skip-update' }));
       break;
     case 'ignore-updates':
       setGame(await call('set_ignore_updates', { id: g.id, ignore: !g.ignore_updates }));
@@ -2352,8 +2421,9 @@ function renderCommunityDetail(g) {
     <div class="box warn">
       <h3>Versão nova no GitHub: ${esc(g.latest_version)}</h3>
       <p>Arquivos em saves, save, savedata, user e config são mantidos.</p>
-      <div class="row"><button data-act="community-update">Atualizar</button></div>
-    </div>` : '';
+      <div class="row"><button data-act="community-update">Atualizar</button>
+        <button class="ghost" data-act="skip-update">Pular esta versão</button></div>
+    </div>` : skippedNote(g);
   $('#detail').innerHTML = `
     <button class="ghost back" data-act="back">← Biblioteca</button>
     <div class="detail">

@@ -163,14 +163,9 @@ async fn search_topic(topic: &str) -> Result<Vec<Item>, String> {
     let url = format!(
         "https://api.github.com/search/repositories?q=topic:{topic}+fork:false+archived:false&sort=stars&order=desc&per_page=60"
     );
-    let resp = github::client()
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = github::api(&url).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("o GitHub respondeu {}", resp.status()));
+        return Err(github::status_error(resp.status()));
     }
     let r: SearchResult = resp.json().await.map_err(|e| e.to_string())?;
     Ok(r.items
@@ -325,17 +320,14 @@ async fn api_releases(repo: &str) -> Result<Vec<ApiRelease>, String> {
     if !valid_repo(repo) {
         return Err("Repositório inválido.".into());
     }
-    let resp = github::client()
-        .get(format!("https://api.github.com/repos/{repo}/releases?per_page=10"))
-        .header("Accept", "application/vnd.github+json")
+    let resp = github::api(&format!("https://api.github.com/repos/{repo}/releases?per_page=10"))
         .send()
         .await
         .map_err(|e| format!("Sem conexão com o GitHub ({e})"))?;
-    match resp.status().as_u16() {
-        200 => resp.json().await.map_err(|e| e.to_string()),
-        403 | 429 => Err("O GitHub limitou as consultas por agora (60 por hora sem login). Tente de novo mais tarde.".into()),
-        404 => Err("O repositório não existe mais ou ficou privado.".into()),
-        s => Err(format!("O GitHub respondeu {s}")),
+    if resp.status().as_u16() == 200 {
+        resp.json().await.map_err(|e| e.to_string())
+    } else {
+        Err(github::status_error(resp.status()))
     }
 }
 

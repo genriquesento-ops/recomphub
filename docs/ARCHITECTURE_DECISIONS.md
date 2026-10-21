@@ -188,6 +188,28 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     (`mods/perfis/<perfil>/<jogo>.json`); antes de o jogo abrir, o `mods.json` fica igual à escolha
     do perfil em uso. Coleções são conjuntos com nome. Tudo isso só com o jogo fechado, porque o
     jogo reescreve o `mods.json`. Antes de instalar ou ligar um mod, backup dos saves.
+42. **Limite de tamanho nos pacotes.** Um arquivo de mod pode ter até 512 MB e um pacote até
+    2 GB. Os bytes copiados são contados (o tamanho escrito no .zip pode mentir), e um pacote
+    acima do limite é recusado e o que já foi copiado é apagado, para nada pela metade parecer
+    um mod inteiro. Ideia da revisão pelo Codex.
+
+## GitHub e Steam (v0.19, ideias do GithubLauncher)
+
+43. **Token do GitHub opcional, só para a API.** Sem login o GitHub responde 60 consultas por
+    hora por PC; com um token pessoal sem permissões, 5.000. O token é testado antes de ser
+    guardado, fica no `settings.json` deste PC, nunca volta para a página e só é enviado para
+    `https://api.github.com/`, nunca para os endereços de download nem para outros sites.
+44. **Pular uma versão, não todas.** "Pular esta versão" guarda a tag da versão nova; o aviso
+    volta quando sair outra. Instalar limpa a escolha. "Avisar sobre versões novas: desligado"
+    (decisão antiga) continua para quem não quer aviso nenhum.
+45. **Adicionar à Steam como jogo não Steam.** O RecompHUB edita o `shortcuts.vdf` da conta que
+    usou a Steam por último. O atalho abre `RecompHUB.exe --play <id>`, então o tempo continua
+    sendo contado, e a Steam dá Big Picture e a configuração de controle. Regras: só com a Steam
+    fechada (ela regrava o arquivo ao sair); um arquivo que o RecompHUB não entende por inteiro
+    não é tocado; os outros atalhos são regravados byte a byte; clicar de novo atualiza o mesmo
+    atalho (mesmo programa e mesmo `--play <id>`) e mantém o id dele; uma cópia do arquivo
+    original fica em `shortcuts.vdf.recomphub-backup`. O id é o que a própria Steam calcularia,
+    e capa e banner viram a arte do atalho na pasta `grid`.
 
 ## Capas
 
