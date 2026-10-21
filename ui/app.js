@@ -1361,6 +1361,46 @@ function lostFilesBox(g) {
     </div>`;
 }
 
+const shaderInfo = {};   // id -> 'loading' | null | {bytes, files, first_time, driver_changed, backup}
+
+async function loadShaders(id) {
+  shaderInfo[id] = 'loading';
+  try {
+    shaderInfo[id] = await invoke('get_shader_cache', { id });
+  } catch {
+    shaderInfo[id] = null;
+  }
+  if (openId === id) render();
+}
+
+function shaderBox(g) {
+  if (!g.in_library || ['not_installed', 'installing'].includes(g.status)) return '';
+  const v = shaderInfo[g.id];
+  if (v === undefined) {
+    setTimeout(() => loadShaders(g.id), 0);
+    return '';
+  }
+  if (!v || v === 'loading') return '';
+  const running = IN_GAME.includes(g.status);
+  const size = v.bytes >= 1073741824 ? `${(v.bytes / 1073741824).toFixed(1).replace('.', ',')} GB` : `${Math.max(1, Math.round(v.bytes / 1048576))} MB`;
+  return `
+    <details class="box ${v.driver_changed ? 'warn' : ''}" ${v.driver_changed || v.first_time ? 'open' : ''}>
+      <summary><h3>Cache de shaders</h3></summary>
+      ${v.first_time
+        ? `<p>Na primeira vez, o port compila os shaders enquanto você joga: pode haver travadinhas, quedas de FPS e efeitos
+            faltando nos primeiros minutos. É normal e melhora sozinho, porque o que já foi compilado fica guardado.</p>`
+        : `<p>Guardado: <b>${size}</b> em ${v.files.toLocaleString('pt-BR')} arquivos. Fica guardado ao atualizar ou desinstalar o port.</p>`}
+      ${v.driver_changed ? `<p class="bad-text">O driver de vídeo mudou desde a última vez que você jogou. O cache foi feito com o
+          driver antigo: se o jogo passar a fechar ao abrir ou mostrar defeitos gráficos, limpe o cache.</p>` : ''}
+      <div class="row">
+        ${v.first_time ? '' : `<button data-act="shader-clear" ${running ? 'disabled' : ''}>Limpar cache de shaders</button>`}
+        ${v.backup ? `<button class="ghost" data-act="shader-undo" ${running ? 'disabled' : ''}>Desfazer limpeza</button>` : ''}
+      </div>
+      <p class="muted">Limpar não conserta problemas em geral: o port compila tudo de novo, com travadinhas no começo. Vale
+        depois de trocar o driver de vídeo ou quando o jogo passou a fechar ao abrir depois de uma atualização.</p>
+    </details>`;
+}
+
 const GPU_PREFS = [[0, 'Deixar o Windows escolher'], [1, 'Economia de energia'], [2, 'Alto desempenho']];
 const APIS = [['Auto', 'Automática'], ['D3D12', 'DirectX 12'], ['Vulkan', 'Vulkan']];
 
@@ -1684,6 +1724,7 @@ function renderPortDetail(g) {
     main += pcCheckBox(g);
     main += filesBox(g);
     main += gfxBox(g);
+    main += shaderBox(g);
     main += modsBox(g);
     main += shortcutsRow(g);
     main += versionBox(g);
@@ -2300,6 +2341,22 @@ async function act(action, g, el) {
       pcInfo = await call('get_pc_info', { refresh: true });
       for (const k of Object.keys(pcChecks)) delete pcChecks[k];
       for (const k of Object.keys(gfx)) delete gfx[k];
+      render();
+      break;
+    case 'shader-clear':
+      if (!confirm(`Limpar o cache de shaders de ${g.title}? Na próxima vez o port compila tudo de novo, com travadinhas no começo. Uma cópia fica guardada para desfazer.`)) break;
+      el.disabled = true;
+      await call('clear_shader_cache', { id: g.id });
+      delete shaderInfo[g.id];
+      toast('Cache de shaders limpo.');
+      render();
+      break;
+    case 'shader-undo':
+      if (!confirm('Devolver o cache de antes da limpeza? O que o port compilou desde então é descartado.')) break;
+      el.disabled = true;
+      await call('undo_shader_clear', { id: g.id });
+      delete shaderInfo[g.id];
+      toast('Cache de shaders devolvido.');
       render();
       break;
     case 'gpu-pref':

@@ -192,7 +192,7 @@ fn view(state: &AppState, game: &'static GameDef) -> GameView {
         (Some(e), Some(l), true) if !e.ignore_updates && e.skipped_version.as_ref() != Some(&l.tag) => match &e.version {
             Some(v) => v != &l.tag,
             // Added from a folder: newer if the release came out a day after the copy's program.
-            None => modified(&dir.as_ref().unwrap().join(&game.exe))
+            None => modified(&dir.as_ref().unwrap().join(game.program_in(dir.as_ref().unwrap())))
                 .map(|m| l.published > m + 86_400)
                 .unwrap_or(false),
         },
@@ -526,7 +526,7 @@ async fn download_covers(app: AppHandle) -> Result<CoverDownload, String> {
             .filter(|g| g.in_library && g.cover.is_none())
             .map(|g| {
                 let game = catalog::get(&g.id);
-                let serial = game.and_then(files::serial);
+                let serial = game.and_then(|d| files::serial(d, g.install_dir.as_deref().map(Path::new)));
                 let mut urls: Vec<String> = game.map(|d| d.cover_urls.iter().map(|u| u.to_string()).collect()).unwrap_or_default();
                 urls.extend(templates.iter().filter_map(|t| covers::fill(t, serial.as_deref(), &g.title)));
                 (g.id, g.title, urls)
@@ -1293,7 +1293,7 @@ async fn pc_check(id: String) -> Result<Vec<pcinfo::Finding>, String> {
 fn game_exe(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     let entry = app.state::<AppState>().library.lock().unwrap().games.get(id).cloned().ok_or("Jogo fora da biblioteca.")?;
     match catalog::get(id) {
-        Some(game) => Ok(Path::new(&entry.install_dir).join(&game.exe)),
+        Some(game) => Ok(Path::new(&entry.install_dir).join(game.program_in(Path::new(&entry.install_dir)))),
         None => pc_exe(&entry).ok_or_else(|| "Jogo sem programa definido.".to_string()),
     }
 }
@@ -1326,6 +1326,129 @@ async fn get_graphics(app: AppHandle, id: String) -> Result<GraphicsView, String
         api,
         n64,
     })
+}
+
+#[derive(Serialize)]
+struct ShaderView {
+    bytes: u64,
+    files: u64,
+    /// No cache yet: the next start compiles everything.
+    first_time: bool,
+    /// The video driver changed since the game last closed.
+    driver_changed: bool,
+    /// "Desfazer limpeza" is possible.
+    backup: bool,
+}
+
+fn shader_target(app: &AppHandle, id: &str) -> Result<Vec<PathBuf>, String> {
+    let game = game_or_err(id)?;
+    let dir = app.state::<AppState>().library.lock().unwrap().games.get(id).map(|e| PathBuf::from(&e.install_dir)).ok_or("Jogo fora da biblioteca.")?;
+    Ok(files::shader_dirs(game, &dir))
+}
+
+/// The game page's "Cache de shaders"; None for ports without one.
+#[tauri::command]
+async fn get_shader_cache(app: AppHandle, id: String) -> Result<Option<ShaderView>, String> {
+    let dirs = match catalog::get(&id) {
+        Some(_) => shader_target(&app, &id)?,
+        None => return Ok(None),
+    };
+    if dirs.is_empty() {
+        return Ok(None);
+    }
+    let recorded = app.state::<AppState>().library.lock().unwrap().games.get(&id).and_then(|e| e.shader_driver.clone());
+    let dirs2 = dirs.clone();
+    let (bytes, files, current) = tauri::async_runtime::spawn_blocking(move || {
+        let (b, f) = dirs2.iter().map(|d| files::dir_size(d)).fold((0, 0), |a, x| (a.0 + x.0, a.1 + x.1));
+        (b, f, pcinfo::driver_signature(&pcinfo::get(false)))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(Some(ShaderView {
+        bytes,
+        files,
+        first_time: files == 0,
+        driver_changed: files > 0 && !current.is_empty() && recorded.map(|r| r != current).unwrap_or(false),
+        backup: dirs.iter().any(|d| files::shader_backup(d).is_dir()),
+    }))
+}
+
+/// Remembers the video drivers a game's shader cache was built with (when it closes).
+pub(crate) fn remember_shader_driver(app: &AppHandle, id: &str) {
+    if catalog::get(id).map(|g| g.shader_cache.is_empty()).unwrap_or(true) {
+        return;
+    }
+    let signature = pcinfo::driver_signature(&pcinfo::get(false));
+    if signature.is_empty() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    if let Some(e) = state.library.lock().unwrap().games.get_mut(id) {
+        e.shader_driver = Some(signature);
+    }
+    let _ = save(&state);
+}
+
+/// "Limpar cache de shaders": the cache moves aside (one copy kept for "Desfazer"); the port
+/// compiles everything again on its next start.
+#[tauri::command]
+async fn clear_shader_cache(app: AppHandle, id: String) -> Result<(), String> {
+    if app.state::<AppState>().sessions.lock().unwrap().is_running(&id) {
+        return Err("Feche o jogo antes de limpar o cache de shaders.".into());
+    }
+    let dirs = shader_target(&app, &id)?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        for d in dirs.iter().filter(|d| d.is_dir()) {
+            let backup = files::shader_backup(d);
+            // The older copy steps aside first and is only deleted once the cache moved, so a
+            // failure leaves everything as it was.
+            let old = backup.with_extension("recomphub-apagar");
+            let had_old = backup.exists();
+            if had_old {
+                let _ = std::fs::remove_dir_all(&old);
+                std::fs::rename(&backup, &old).map_err(|e| format!("Não consegui mexer na cópia anterior do cache: {e}"))?;
+            }
+            if let Err(e) = std::fs::rename(d, &backup) {
+                if had_old {
+                    let _ = std::fs::rename(&old, &backup);
+                }
+                return Err(format!("Não consegui limpar o cache (o jogo está aberto?): {e}"));
+            }
+            if had_old {
+                let _ = std::fs::remove_dir_all(&old);
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    // The new cache will be built by the driver in use now.
+    remember_shader_driver(&app, &id);
+    Ok(())
+}
+
+/// "Desfazer limpeza": the copy comes back, replacing whatever the port rebuilt since.
+#[tauri::command]
+async fn undo_shader_clear(app: AppHandle, id: String) -> Result<(), String> {
+    if app.state::<AppState>().sessions.lock().unwrap().is_running(&id) {
+        return Err("Feche o jogo antes.".into());
+    }
+    let dirs = shader_target(&app, &id)?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        for d in &dirs {
+            let backup = files::shader_backup(d);
+            if !backup.is_dir() {
+                continue;
+            }
+            if d.exists() {
+                std::fs::remove_dir_all(d).map_err(|e| e.to_string())?;
+            }
+            std::fs::rename(&backup, d).map_err(|e| format!("Não consegui devolver o cache: {e}"))?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2883,7 +3006,7 @@ fn play(app: AppHandle, id: String) -> Result<(), String> {
 /// The game's program inside its folder: the catalog's for ports, the chosen one otherwise.
 pub(crate) fn program_of(id: &str, entry: &library::Entry) -> Option<String> {
     match catalog::get(id) {
-        Some(game) => Some(game.exe.to_string()),
+        Some(game) => Some(game.program_in(Path::new(&entry.install_dir))),
         None => entry.exe.clone(),
     }
 }
@@ -2915,7 +3038,7 @@ fn shortcut_target(app: &AppHandle, id: &str) -> Result<(String, PathBuf), Strin
     let dir = PathBuf::from(&entry.install_dir);
     Ok(match catalog::get(id) {
         Some(game) => {
-            let icon = Some(dir.join(&game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(&game.exe));
+            let icon = Some(dir.join(&game.icon)).filter(|p| p.is_file()).unwrap_or_else(|| dir.join(game.program_in(&dir)));
             (game.title.to_string(), icon)
         }
         // A PC game's program carries its own icon.
@@ -3166,6 +3289,9 @@ pub fn run() {
             get_graphics,
             set_gpu_preference,
             set_graphics_api,
+            get_shader_cache,
+            clear_shader_cache,
+            undo_shader_clear,
             open_windows_security,
             fps_status,
             fps_download,

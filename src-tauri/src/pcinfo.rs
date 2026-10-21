@@ -279,6 +279,11 @@ pub fn set_gpu_preference(exe: &std::path::Path, pref: u8) -> Result<(), String>
     }
 }
 
+/// The video cards and their driver versions, to notice a driver update.
+pub fn driver_signature(info: &PcInfo) -> String {
+    info.gpus.iter().filter(|g| !is_basic(g)).map(|g| format!("{}={}", g.name, g.driver_version)).collect::<Vec<_>>().join(";")
+}
+
 /// Plain text for "Copiar informações do PC" (problem reports).
 pub fn report(info: &PcInfo) -> String {
     let gpus = info

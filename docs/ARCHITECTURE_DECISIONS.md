@@ -249,6 +249,23 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     ignora cliques, no canto de cima; em tela cheia exclusiva o Windows a esconde. A medição
     começa quando o vigia vê o jogo aberto e termina com ele.
 
+## Ports que mudam de nome e cache de shaders (v0.23)
+
+50. **Mudança de nome sem perder ninguém.** O gow3_pc virou SpartanPort (repositório, arquivo do
+    release, programa e lugar das configurações). O catálogo usa os nomes novos e guarda os
+    antigos (`legacy_exe`, `legacy_markers`), para uma instalação antiga continuar reconhecida e
+    jogável até a atualização. O caminho antigo das configurações fica em `settings_file`, que as
+    versões antigas do RecompHUB entendem, e o novo em `portable_settings_file`; assim quem ainda
+    não atualizou o RecompHUB continua vendo o jogo e já recebe o download certo. Os dados vêm do
+    código do projeto (`legacy.py`, `USER_FILES` do launcher), não de suposição.
+51. **Shaders: o port compila, o RecompHUB cuida do cache.** Um launcher não consegue compilar
+    os shaders pelo port (só o jogo sabe quais vai usar), e os ports já compilam em segundo plano.
+    O RecompHUB mostra o tamanho do cache, avisa na primeira vez que travadinhas são normais,
+    lembra o driver de vídeo com que o cache foi feito e avisa quando ele mudou (cache de outro
+    driver pode fechar o jogo ao abrir). "Limpar" move a pasta para `.recomphub-anterior` e
+    "Desfazer" a devolve; nada é apagado sem uma cópia. Compartilhar cache entre jogadores fica de
+    fora: depende da placa e do driver, e contém shaders do próprio jogo.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

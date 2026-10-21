@@ -210,6 +210,9 @@ fn tick(app: &AppHandle, sys: &System) {
     }
     for (id, _) in &ended {
         crate::fps::stop(app, Some(id));
+        let (app, id) = (app.clone(), id.clone());
+        // Reading the drivers can take a second the first time; not on the watcher's pace.
+        std::thread::spawn(move || crate::remember_shader_driver(&app, &id));
     }
     for id in started {
         if let Some(name) = folders.iter().find(|(i, _, _)| *i == id).and_then(|(_, _, n)| n.clone()) {

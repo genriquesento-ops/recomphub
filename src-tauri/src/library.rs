@@ -53,6 +53,10 @@ pub struct Entry {
     /// GithubLauncher's SkippedUpdateVersion). Cleared on install.
     #[serde(default)]
     pub skipped_version: Option<String>,
+    /// Video drivers when the game last closed, to tell when the shader cache was made by
+    /// another driver (pcinfo::driver_signature).
+    #[serde(default)]
+    pub shader_driver: Option<String>,
     /// Shown first in the library.
     #[serde(default)]
     pub favorite: bool,

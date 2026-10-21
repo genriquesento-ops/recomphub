@@ -34,6 +34,8 @@ Enquanto o repositório for privado, o endereço remoto responde 404 e só a có
 | `repo`, `asset_prefix`, `asset_suffix` | Repositório no GitHub e como reconhecer o `.zip` de Windows nos releases. |
 | `exe`, `icon` | Programa aberto pelo Jogar e ícone dos atalhos (caminhos dentro da pasta do port). |
 | `markers` | Arquivos que identificam uma pasta como sendo deste port. |
+| `legacy_exe`, `legacy_markers` | Opcionais. Nomes de antes de o projeto mudar de nome: uma instalação antiga continua reconhecida (todos os `legacy_markers`) e o Jogar abre o `legacy_exe` até o jogador atualizar. |
+| `shader_cache` | Opcional. Pastas onde o port guarda os shaders compilados (`{install}` permitido). Liga a caixa "Cache de shaders" na página do jogo. Ponha a pasta também em `keep_on_update` para ela sobreviver a atualizações e desinstalações. |
 | `keep_on_update` | Arquivos ou pastas (terminadas em `/`) que a atualização não sobrescreve. |
 | `requirements`, `needs`, `files_help` | Textos da página do jogo. |
 | `cpu_features` | Opcional. Instruções que o código do port exige do processador (`sse4.1`, `sse4.2`, `popcnt`, `avx`, `avx2`, `fma`, `f16c`, `bmi1`, `bmi2`, `lzcnt`, `movbe`). Num PC sem elas, a página do jogo avisa antes de instalar. Só coloque o que o projeto confirmou (issue, README ou log de erro 0xc000001d). |
@@ -65,7 +67,8 @@ Para ports de PS4 que leem um dump. O RecompHUB confere `eboot.bin`, `sce_module
 | Campo | O que é |
 | --- | --- |
 | `title_ids`, `tested_versions` | Códigos aceitos e versões testadas pelo port. |
-| `settings_file` | Arquivo JSON de configuração do port. |
+| `settings_file` | Arquivo JSON de configuração do port. Sem `{install}`: versões do RecompHUB antes da 0.23 recusam e tirariam o jogo do catálogo delas. |
+| `portable_settings_file` | Opcional. O mesmo arquivo dentro da pasta do port (`{install}` permitido), para ports que passaram a guardar lá. É lido e gravado primeiro; `settings_file` fica de reserva. |
 | `game_dir_key`, `update_dir_key`, `user_dir_key` | Chaves desse arquivo. |
 
 ### `none`

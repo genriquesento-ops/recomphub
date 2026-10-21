@@ -45,7 +45,14 @@ pub enum Verifier {
     Ps4Dump {
         title_ids: Vec<String>,
         tested_versions: Vec<String>,
+        /// Where the port's launcher keeps its settings. No {install} here: RecompHUB versions
+        /// before 0.23 refuse it, and would drop the whole game from their catalog.
         settings_file: String,
+        /// The settings next to the port's program ({install} allowed), which newer versions of
+        /// the port use (SpartanPort). Read and written first; `settings_file` stays as the
+        /// fallback until the port's launcher copies it over on its first start.
+        #[serde(default)]
+        portable_settings_file: Option<String>,
         game_dir_key: String,
         #[serde(default)]
         update_dir_key: Option<String>,
@@ -89,6 +96,16 @@ pub struct GameDef {
     pub exe: String,
     /// Icon for shortcuts (relative to the install folder; an .exe uses its own icon).
     pub icon: String,
+    /// The program's name before the project renamed it (installations not yet updated).
+    #[serde(default)]
+    pub legacy_exe: Option<String>,
+    /// Markers of an installation from before the rename.
+    #[serde(default)]
+    pub legacy_markers: Vec<String>,
+    /// Folders where the port keeps its compiled shaders ({install} allowed): kept on
+    /// uninstall like the saves, and "Limpar cache de shaders" on the game page.
+    #[serde(default)]
+    pub shader_cache: Vec<String>,
     /// Files whose presence identifies an installed copy of this port.
     pub markers: Vec<String>,
     /// Files kept from the old copy when updating (paths or folder prefixes, with '/').
@@ -124,8 +141,20 @@ pub struct Catalog {
 }
 
 impl GameDef {
+    /// The folder holds this port: every marker, or every legacy marker (an installation from
+    /// before the project's rename, which an update brings to the new names).
     pub fn matches(&self, dir: &Path) -> bool {
-        self.markers.iter().all(|m| dir.join(m).is_file())
+        let all = |list: &[String]| !list.is_empty() && list.iter().all(|m| dir.join(m).is_file());
+        all(&self.markers) || all(&self.legacy_markers)
+    }
+
+    /// The program the Play button opens in `dir`: the current name, or the old one in an
+    /// installation from before the rename.
+    pub fn program_in(&self, dir: &Path) -> String {
+        match &self.legacy_exe {
+            Some(old) if !dir.join(&self.exe).is_file() && dir.join(old).is_file() => old.clone(),
+            _ => self.exe.clone(),
+        }
     }
 
     /// "folder" or "file": what the player picks when providing the game files.
@@ -180,15 +209,24 @@ pub fn validate(g: &GameDef) -> Result<(), String> {
     if !g.cpu_features.iter().all(|f| crate::pcinfo::CPU_FEATURES.contains(&f.as_str())) {
         return err("cpu_features desconhecido");
     }
-    if g.markers.is_empty() || !g.markers.iter().all(|m| safe_relative(m)) {
+    if g.markers.is_empty() || !g.markers.iter().chain(&g.legacy_markers).all(|m| safe_relative(m)) {
         return err("markers inválidos");
     }
     let rel_ok = |list: &[String]| list.iter().all(|p| safe_relative(p.trim_end_matches('/')));
-    if !safe_relative(&g.exe) || !safe_relative(&g.icon) || !rel_ok(&g.keep_on_update) || !rel_ok(&g.cover_files) {
+    if !safe_relative(&g.exe)
+        || !g.legacy_exe.as_deref().map(safe_relative).unwrap_or(true)
+        || !safe_relative(&g.icon)
+        || !rel_ok(&g.keep_on_update)
+        || !rel_ok(&g.cover_files)
+    {
         return err("caminho fora da pasta do port");
     }
-    if !g.exe.to_lowercase().ends_with(".exe") || g.asset_prefix.is_empty() || !g.asset_suffix.ends_with(".zip") {
+    let is_exe = |e: &str| e.to_lowercase().ends_with(".exe");
+    if !is_exe(&g.exe) || !g.legacy_exe.as_deref().map(is_exe).unwrap_or(true) || g.asset_prefix.is_empty() || !g.asset_suffix.ends_with(".zip") {
         return err("programa ou arquivo de release inválido");
+    }
+    if !g.shader_cache.iter().all(|s| expand(s, Some(Path::new("C:\\x"))).is_some()) {
+        return err("pasta de shaders inválida");
     }
     if !g.saves.iter().all(|s| expand(s, Some(Path::new("C:\\x"))).is_some()) {
         return err("pasta de saves inválida");
@@ -203,7 +241,10 @@ pub fn validate(g: &GameDef) -> Result<(), String> {
                 return err("dados da ROM inválidos");
             }
         }
-        Verifier::Ps4Dump { title_ids, settings_file, .. } => {
+        Verifier::Ps4Dump { title_ids, settings_file, portable_settings_file, .. } => {
+            if portable_settings_file.as_deref().map(|p| expand(p, Some(Path::new("C:\\x"))).is_none()).unwrap_or(false) {
+                return err("portable_settings_file inválido");
+            }
             if title_ids.is_empty() || expand(settings_file, None).is_none() {
                 return err("dados do dump inválidos");
             }
@@ -322,6 +363,27 @@ mod tests {
         assert!(expand("%TEMP%\\x", None).is_none());
         assert!(expand("{install}\\..\\..\\Windows", Some(Path::new("C:\\g"))).is_none());
         assert!(expand("relative\\path", None).is_none());
+    }
+
+    #[test]
+    fn renamed_port_keeps_old_installations() {
+        let (_, games, _) = parse(BUILTIN).unwrap();
+        let g = games.iter().find(|g| g.id == "gow3").unwrap();
+        let dir = std::env::temp_dir().join(format!("recomphub-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        for f in &g.legacy_markers {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        // Before the update: recognised, and Play opens the old program.
+        assert!(g.matches(&dir));
+        assert_eq!(g.program_in(&dir), g.legacy_exe.clone().unwrap());
+        // After the update: the new program wins.
+        for f in &g.markers {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        assert_eq!(g.program_in(&dir), g.exe);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

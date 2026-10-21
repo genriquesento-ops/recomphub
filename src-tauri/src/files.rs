@@ -29,7 +29,7 @@ impl FilesStatus {
 
 pub fn status(game: &GameDef, install_dir: &Path) -> FilesStatus {
     match &game.files {
-        Verifier::Ps4Dump { .. } => ps4::status(&game.files),
+        Verifier::Ps4Dump { .. } => ps4::status(&game.files, Some(install_dir)),
         Verifier::N64Rom { .. } => n64::status(&game.files, install_dir),
         Verifier::None => FilesStatus {
             ok: true,
@@ -52,17 +52,17 @@ pub fn find_rom(game: &GameDef, root: &Path) -> Option<PathBuf> {
 /// The player picked `path`: check it and, when it is right, hand it to the port.
 pub fn provide(game: &GameDef, install_dir: &Path, path: &Path) -> FilesStatus {
     match &game.files {
-        Verifier::Ps4Dump { .. } => ps4::provide(&game.files, path),
+        Verifier::Ps4Dump { .. } => ps4::provide(&game.files, install_dir, path),
         Verifier::N64Rom { .. } => n64::provide(game, install_dir, path),
         Verifier::None => status(game, install_dir),
     }
 }
 
 /// The game's serial, for cover addresses with ${serial}.
-pub fn serial(game: &GameDef) -> Option<String> {
+pub fn serial(game: &GameDef, install_dir: Option<&Path>) -> Option<String> {
     match &game.files {
         // The player's own dump says which edition it is (CUSA01623 or CUSA01715).
-        Verifier::Ps4Dump { .. } => ps4::title_id(&game.files).or_else(|| game.serial.clone()),
+        Verifier::Ps4Dump { .. } => ps4::title_id(&game.files, install_dir).or_else(|| game.serial.clone()),
         _ => game.serial.clone(),
     }
 }
@@ -101,6 +101,50 @@ pub fn set_n64_graphics_api(game: &GameDef, install_dir: &Path, api: &str) -> Re
     })
 }
 
+/// Where the port keeps compiled shaders: the catalog's folders, and the cache inside a
+/// "Saves folder" the player chose in a PS4 port's launcher.
+pub fn shader_dirs(game: &GameDef, install_dir: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = game.shader_cache.iter().filter_map(|t| catalog::expand(t, Some(install_dir))).collect();
+    if !game.shader_cache.is_empty() {
+        if let Verifier::Ps4Dump { .. } = &game.files {
+            if let Some(user) = ps4::user_dir(&game.files, Some(install_dir)) {
+                out.push(user.join("cache"));
+            }
+        }
+    }
+    out.dedup();
+    out
+}
+
+/// Bytes and files under `dir` (stops counting at 500,000 files).
+pub fn dir_size(dir: &Path) -> (u64, u64) {
+    let (mut bytes, mut files) = (0u64, 0u64);
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for e in entries.flatten() {
+            let Ok(t) = e.file_type() else { continue };
+            if t.is_dir() {
+                stack.push(e.path());
+            } else if t.is_file() {
+                files += 1;
+                bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+                if files >= 500_000 {
+                    return (bytes, files);
+                }
+            }
+        }
+    }
+    (bytes, files)
+}
+
+/// The copy "Limpar cache de shaders" leaves beside the cache, for "Desfazer".
+pub fn shader_backup(dir: &Path) -> PathBuf {
+    let mut name = dir.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".recomphub-anterior");
+    dir.with_file_name(name)
+}
+
 /// The player's ROM as the port stored it (.z64 byte order), once provided.
 pub fn n64_rom_file(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     let Verifier::N64Rom { game_id, .. } = &game.files else { return None };
@@ -118,7 +162,7 @@ pub fn save_dir(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     match &game.files {
         // A custom "Saves folder" holds savedata\ (and the shader cache, left out).
-        Verifier::Ps4Dump { .. } => candidates.extend(ps4::user_dir(&game.files).map(|d| d.join("savedata"))),
+        Verifier::Ps4Dump { .. } => candidates.extend(ps4::user_dir(&game.files, Some(install_dir)).map(|d| d.join("savedata"))),
         Verifier::N64Rom { .. } => {
             if let Some(data) = n64::data_dir(&game.files, install_dir) {
                 candidates.push(data.join("saves"));
@@ -135,7 +179,7 @@ pub fn save_dir(game: &GameDef, install_dir: &Path) -> Option<PathBuf> {
 pub fn cover(game: &GameDef, install_dir: Option<&Path>) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Verifier::Ps4Dump { .. } = &game.files {
-        if let Some(dump) = ps4::game_dir(&game.files) {
+        if let Some(dump) = ps4::game_dir(&game.files, install_dir) {
             candidates.push(dump.join("sce_sys").join("icon0.png"));
         }
     }
@@ -223,6 +267,7 @@ mod ps4 {
         title_ids: &'a [String],
         tested: &'a [String],
         settings_file: &'a str,
+        portable_settings_file: Option<&'a str>,
         game_dir_key: &'a str,
         update_dir_key: Option<&'a str>,
         user_dir_key: Option<&'a str>,
@@ -230,11 +275,12 @@ mod ps4 {
 
     fn cfg(v: &Verifier) -> Option<Cfg<'_>> {
         match v {
-            Verifier::Ps4Dump { title_ids, tested_versions, settings_file, game_dir_key, update_dir_key, user_dir_key } => {
+            Verifier::Ps4Dump { title_ids, tested_versions, settings_file, portable_settings_file, game_dir_key, update_dir_key, user_dir_key } => {
                 Some(Cfg {
                     title_ids,
                     tested: tested_versions,
                     settings_file,
+                    portable_settings_file: portable_settings_file.as_deref(),
                     game_dir_key,
                     update_dir_key: update_dir_key.as_deref(),
                     user_dir_key: user_dir_key.as_deref(),
@@ -244,32 +290,44 @@ mod ps4 {
         }
     }
 
-    /// The port's own launcher settings: it reads the dump folder from here.
-    fn settings(c: &Cfg) -> Map<String, Value> {
-        catalog::expand(c.settings_file, None)
-            .and_then(|p| std::fs::read(p).ok())
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            .and_then(|v| v.as_object().cloned())
-            .unwrap_or_default()
+    fn read_object(path: Option<PathBuf>) -> Option<Map<String, Value>> {
+        let bytes = std::fs::read(path?).ok()?;
+        serde_json::from_slice::<Value>(&bytes).ok()?.as_object().cloned()
     }
 
-    fn setting_dir(c: &Cfg, key: Option<&str>) -> Option<PathBuf> {
-        settings(c).get(key?)?.as_str().filter(|s| !s.is_empty()).map(PathBuf::from)
+    /// Where the settings are written: next to the port when it keeps them there.
+    fn settings_path(c: &Cfg, install: Option<&Path>) -> Option<PathBuf> {
+        c.portable_settings_file.and_then(|p| catalog::expand(p, install)).or_else(|| catalog::expand(c.settings_file, install))
     }
 
-    pub fn game_dir(v: &Verifier) -> Option<PathBuf> {
+    /// The port's own launcher settings: it reads the dump folder from here. Until the port's
+    /// launcher first runs after it moved its settings next to the program (SpartanPort), the
+    /// old file still holds the player's choices.
+    fn settings(c: &Cfg, install: Option<&Path>) -> Map<String, Value> {
+        let portable = c.portable_settings_file.and_then(|p| catalog::expand(p, install));
+        // A portable file that cannot be read (half written, edited by hand) does not hide the
+        // player's choices kept in the old one.
+        let from_portable = portable.filter(|p| p.is_file()).and_then(|p| read_object(Some(p)));
+        from_portable.or_else(|| read_object(catalog::expand(c.settings_file, install))).unwrap_or_default()
+    }
+
+    fn setting_dir(c: &Cfg, install: Option<&Path>, key: Option<&str>) -> Option<PathBuf> {
+        settings(c, install).get(key?)?.as_str().filter(|s| !s.is_empty()).map(PathBuf::from)
+    }
+
+    pub fn game_dir(v: &Verifier, install: Option<&Path>) -> Option<PathBuf> {
         let c = cfg(v)?;
-        setting_dir(&c, Some(c.game_dir_key))
+        setting_dir(&c, install, Some(c.game_dir_key))
     }
 
     /// A custom "Saves folder" chosen in the port's launcher.
-    pub fn user_dir(v: &Verifier) -> Option<PathBuf> {
+    pub fn user_dir(v: &Verifier, install: Option<&Path>) -> Option<PathBuf> {
         let c = cfg(v)?;
-        setting_dir(&c, c.user_dir_key)
+        setting_dir(&c, install, c.user_dir_key)
     }
 
-    pub fn title_id(v: &Verifier) -> Option<String> {
-        let sfo = std::fs::read(game_dir(v)?.join("sce_sys").join("param.sfo")).ok()?;
+    pub fn title_id(v: &Verifier, install: Option<&Path>) -> Option<String> {
+        let sfo = std::fs::read(game_dir(v, install)?.join("sce_sys").join("param.sfo")).ok()?;
         sfo::read_string(&sfo, "TITLE_ID").filter(|t| !t.is_empty())
     }
 
@@ -324,10 +382,10 @@ mod ps4 {
         path.to_path_buf()
     }
 
-    fn describe(c: &Cfg, dir: &Path, dump: &Dump) -> FilesStatus {
+    fn describe(c: &Cfg, install: Option<&Path>, dir: &Path, dump: &Dump) -> FilesStatus {
         let mut details = vec![format!("Dump encontrado: {} · versão {}", dump.title_id, dump.version)];
         let mut version = dump.version.clone();
-        if let Some(update) = setting_dir(c, c.update_dir_key) {
+        if let Some(update) = setting_dir(c, install, c.update_dir_key) {
             if let Some(v) = std::fs::read(update.join("sce_sys").join("param.sfo"))
                 .ok()
                 .and_then(|b| sfo::read_string(&b, "APP_VER"))
@@ -345,16 +403,16 @@ mod ps4 {
         FilesStatus::ok(format!("{} · versão {version}", dump.title_id), details, dir)
     }
 
-    pub fn status(v: &Verifier) -> FilesStatus {
+    pub fn status(v: &Verifier, install: Option<&Path>) -> FilesStatus {
         let Some(c) = cfg(v) else { return FilesStatus::default() };
-        let Some(dir) = setting_dir(&c, Some(c.game_dir_key)) else {
+        let Some(dir) = setting_dir(&c, install, Some(c.game_dir_key)) else {
             return FilesStatus::missing(
                 "Falta indicar a pasta do jogo",
                 vec!["O port precisa da pasta com o dump da sua cópia de PS4.".to_string()],
             );
         };
         match check_dump(&c, &dir) {
-            Ok(dump) => describe(&c, &dir, &dump),
+            Ok(dump) => describe(&c, install, &dir, &dump),
             Err(mut problems) => {
                 problems.insert(0, format!("A pasta configurada ({}) não está completa:", dir.display()));
                 FilesStatus::missing("Os arquivos do jogo estão incompletos", problems)
@@ -362,7 +420,7 @@ mod ps4 {
         }
     }
 
-    pub fn provide(v: &Verifier, path: &Path) -> FilesStatus {
+    pub fn provide(v: &Verifier, install: &Path, path: &Path) -> FilesStatus {
         let Some(c) = cfg(v) else { return FilesStatus::default() };
         let dir = find_dump(path);
         let dump = match check_dump(&c, &dir) {
@@ -370,9 +428,9 @@ mod ps4 {
             Err(problems) => return FilesStatus::missing("Esta pasta não serve", problems),
         };
         // Same setting the port's own launcher writes ("Game folder").
-        let mut s = settings(&c);
+        let mut s = settings(&c, Some(install));
         s.insert(c.game_dir_key.into(), Value::String(dir.display().to_string()));
-        let saved = catalog::expand(c.settings_file, None).ok_or(()).and_then(|p| {
+        let saved = settings_path(&c, Some(install)).ok_or(()).and_then(|p| {
             std::fs::create_dir_all(p.parent().ok_or(())?).map_err(|_| ())?;
             let text = serde_json::to_string_pretty(&Value::Object(s)).map_err(|_| ())?;
             std::fs::write(&p, text).map_err(|_| ())
@@ -383,7 +441,7 @@ mod ps4 {
                 vec![format!("Não foi possível gravar {}.", c.settings_file)],
             );
         }
-        describe(&c, &dir, &dump)
+        describe(&c, Some(install), &dir, &dump)
     }
 }
 
