@@ -3,6 +3,7 @@ mod autosave;
 mod catalog;
 mod catalog_sync;
 mod community;
+mod community_art;
 mod covers;
 mod files;
 mod fps;
@@ -1135,6 +1136,12 @@ async fn get_community(app: AppHandle, force: bool) -> CommunityView {
     let path = app.state::<AppState>().community_path.clone();
     let cache = community::refresh(&path, force).await;
     let state = app.state::<AppState>();
+    // Pictures still missing are looked for in the background (community_art.rs).
+    {
+        let keys = state.settings.lock().unwrap().keys();
+        let dir = community_art_dir(&state);
+        community_art::fill(app.clone(), dir.clone(), dir.join("meta"), cache.items.clone(), keys);
+    }
     let lib = state.library.lock().unwrap();
     let items = cache
         .items
@@ -1149,6 +1156,17 @@ async fn get_community(app: AppHandle, force: bool) -> CommunityView {
         })
         .collect();
     CommunityView { items, fetched_at: cache.fetched_at, errors: cache.errors, list_page: community::LIST_PAGE }
+}
+
+fn community_art_dir(state: &AppState) -> PathBuf {
+    state.community_path.with_file_name("comunidade-imagens")
+}
+
+/// The Comunidade pictures found so far: id -> (data URL, source).
+#[tauri::command]
+async fn get_community_art(app: AppHandle) -> Result<std::collections::HashMap<String, (String, String)>, String> {
+    let dir = community_art_dir(&app.state::<AppState>());
+    tauri::async_runtime::spawn_blocking(move || community_art::all(&dir)).await.map_err(|e| e.to_string())
 }
 
 /// A repository the page may act on: listed in the Comunidade cache or installed from it.
@@ -3290,6 +3308,7 @@ pub fn run() {
             set_gpu_preference,
             set_graphics_api,
             get_shader_cache,
+            get_community_art,
             clear_shader_cache,
             undo_shader_clear,
             open_windows_security,

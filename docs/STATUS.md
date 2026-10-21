@@ -26,6 +26,7 @@
 - [x] **v0.22** Contador de FPS por cima do jogo (PresentMon da Intel, permissão de administrador uma única vez)
 - [x] **v0.23** God of War III no SpartanPort (nome novo, instalações antigas mantidas, exigência de CPU corrigida para só AVX) e cache de shaders na página do jogo
 - [x] **v0.24** Comunidade: .7z e .exe portátil, instaladores explicados, nome do jogo nos cartões (inFAMOUS, The Last Guardian…), tópicos native-port, xenonrecomp e ps3recomp
+- [x] **v0.25** Fotos na aba Comunidade (capa da SteamGridDB/IGDB ou imagem do README do projeto)
 - [x] Repositório público (MIT) na organização `recomphub-app`, com site no GitHub Pages; a situação atual está em `HANDOFF.md`
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 

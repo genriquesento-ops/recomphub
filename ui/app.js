@@ -2520,6 +2520,35 @@ listen('notify', (e) => toast(String(e.payload), true));
 // ---- Aba Comunidade: ports from the awesome list and GitHub topics, not verified ----
 
 let communityData = null;      // { items, fetched_at, errors, list_page }
+let communityArt = null;       // id -> [data URL, source], filled as pictures are found
+let artRender = null;
+
+async function loadCommunityArt() {
+  communityArt = {};
+  try {
+    communityArt = await invoke('get_community_art');
+  } catch { /* the cards show the name */ }
+  render();
+}
+
+// Pictures arrive a few at a time; the page is drawn again at most every 600 ms.
+listen('community-art', (e) => {
+  if (!communityArt) communityArt = {};
+  communityArt[e.payload.id] = [e.payload.url, e.payload.source];
+  const showing = tab === 'community' || (openId && openId.startsWith('c:'));
+  if (showing && !artRender) {
+    artRender = setTimeout(() => { artRender = null; render(); }, 600);
+  }
+});
+
+function communityCover(i) {
+  const art = communityArt && communityArt[communityId(i.repo)];
+  return art
+    ? `<div class="cover"><img src="${art[0]}" alt="" loading="lazy"></div>`
+    : `<div class="cover"><div class="placeholder">${esc(i.game || i.name)}</div></div>`;
+}
+
+const ART_SOURCE = { README: 'Imagem do README do projeto', SteamGridDB: 'Capa da SteamGridDB', IGDB: 'Capa da IGDB' };
 let communityLoading = false;
 const communityRelease = {};   // repo -> 'loading' | null | { tag, published, prerelease, assets }
 
@@ -2549,6 +2578,7 @@ function renderCommunityGrid() {
   const head = $('#community-head');
   head.hidden = false;
   if (!communityData && !communityLoading) loadCommunity(false);
+  if (!communityArt) loadCommunityArt();
   const data = communityData || { items: [], errors: [], fetched_at: 0 };
   head.innerHTML = `
     <p>Ports feitos pela comunidade, puxados direto do GitHub: a lista
@@ -2580,7 +2610,7 @@ function renderCommunityGrid() {
   empty.textContent = data.items.length ? 'Nenhum port com esse filtro.' : 'Nenhum port carregado. Verifique a internet e clique em "Atualizar lista".';
   $('#grid').innerHTML = list.map((i) => `
     <div class="card" data-repo="${esc(i.repo)}">
-      <div class="cover"><div class="placeholder">${esc(i.game || i.name)}</div></div>
+      ${communityCover(i)}
       <div class="body">
         <div class="title">${esc(i.game || i.name)}</div>
         <div>
@@ -2668,6 +2698,10 @@ function renderCommunityItem(repo) {
         <span class="chip family">Fonte: ${i.sources.map(esc).join(' e ')}</span>
         ${i.stars != null ? `<span class="chip family">★ ${i.stars}</span>` : ''}
       </div>
+      ${(() => {
+        const art = communityArt && communityArt[id];
+        return art ? `<figure class="community-shot"><img src="${art[0]}" alt=""><figcaption class="muted">${esc(ART_SOURCE[art[1]] || '')}</figcaption></figure>` : '';
+      })()}
       ${i.description ? `<p>${esc(i.description)}</p>` : ''}
       ${install}
     </div>`;

@@ -282,6 +282,13 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     a descrição não diz, fica o nome do repositório. Entraram os tópicos `native-port`,
     `xenonrecomp` e `ps3recomp`, e ports para outras máquinas (3DS, Vita, Switch) ficam de fora.
 
+54. **Fotos na Comunidade sem servidor nosso.** Cada port ganha uma miniatura: a capa da
+    SteamGridDB ou da IGDB (com a chave do jogador, pelo nome tirado da descrição) ou a primeira
+    imagem do README do projeto. Do README só valem servidores do GitHub e o Imgur, sem selos nem
+    botões de doação, até 8 MB, com limite de pixels e de memória antes de abrir a imagem. As
+    miniaturas (360×360, JPEG) ficam em `comunidade-imagens/` e chegam aos poucos, em segundo
+    plano; um port sem imagem é tentado de novo depois de uma semana.
+
 ## Capas
 
 13. **Ordem fixa:** capa escolhida pelo jogador → imagem dos arquivos do próprio jogo → capa

@@ -426,3 +426,8 @@ button.small { font-size: 12px; padding: 4px 10px; }
 .fps-steps li { margin: 8px 0; }
 .fps-steps button { margin-left: 8px; }
 .fps-steps p { margin: 6px 0 0; }
+
+/* Comunidade: a port's picture on its page */
+.community-shot { margin: 12px 0; max-width: 360px; }
+.community-shot img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid var(--line); display: block; }
+.community-shot figcaption { font-size: 12px; margin-top: 4px; }
