@@ -4,16 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RecompHUB</title>
-  <meta name="description" content="Launcher gratuito para Windows dos ports nativos de jogos de console: instala, confere seus arquivos, conta o tempo, faz backup dos saves e traz mods e conquistas.">
+  <meta name="description" content="Launcher gratuito para Windows dos ports nativos de jogos de console. Instala o port da página oficial, confere os arquivos da sua cópia, conta o tempo de jogo e faz backup dos saves.">
   <meta property="og:title" content="RecompHUB">
-  <meta property="og:description" content="O launcher dos ports nativos de jogos de console para Windows.">
+  <meta property="og:description" content="Launcher gratuito para Windows dos ports nativos de jogos de console.">
   <meta property="og:image" content="img/biblioteca.jpg">
   <link rel="icon" href="img/icone.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112..125,700..900&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="nav">
-    <a class="brand" href="#topo"><img src="img/icone.png" alt=""><b>Recomp<span>HUB</span></b></a>
+  <header class="top">
+    <a class="brand" href="#topo"><img src="img/icone.png" alt="" width="28" height="28">RecompHUB</a>
     <nav>
       <a href="#recursos">Recursos</a>
       <a href="#ports">Ports</a>
@@ -22,126 +25,113 @@
       <a href="#novidades">Novidades</a>
       <a href="#apoie" id="nav-apoie" hidden>Apoiar</a>
     </nav>
-    <a class="btn small primary" href="#baixar">Baixar</a>
   </header>
 
   <main id="topo">
     <section class="hero">
       <div class="hero-text">
-        <p class="eyebrow">Grátis · código aberto · Windows 10 e 11</p>
-        <h1>Os ports nativos de jogos de console, <em>num lugar só.</em></h1>
-        <p class="lead">O RecompHUB instala os ports direto da página oficial de cada projeto, confere os arquivos da
-          <b>sua</b> cópia do jogo, conta seu tempo de jogo, faz backup dos saves e ainda traz mods e conquistas.</p>
+        <h1>Um launcher para os ports nativos de jogos de console.</h1>
+        <p class="lead">Ele baixa cada port da página oficial do projeto, confere se os arquivos da sua cópia do jogo são a
+          versão certa e abre o jogo. O tempo de jogo e o backup dos saves ficam por conta dele.</p>
         <div class="cta" id="baixar">
-          <a class="btn big primary" id="download" href="https://github.com/recomphub-app/recomphub/releases/latest">
-            <span>Baixar para Windows</span>
-            <small id="download-info">instalador .exe</small>
-          </a>
-          <a class="btn big ghost" href="https://github.com/recomphub-app/recomphub">Ver o código no GitHub</a>
+          <a class="btn" id="download" href="https://github.com/recomphub-app/recomphub/releases/latest">Baixar para Windows</a>
+          <span class="dl-info" id="download-info">instalador .exe</span>
         </div>
-        <p class="fine">O Windows pode mostrar "O Windows protegeu o computador" por o instalador ainda não ter assinatura
-          digital: clique em <b>Mais informações</b> e depois em <b>Executar assim mesmo</b>.
-          <a href="#perguntas">Por quê?</a></p>
+        <p class="fine">Ao instalar, o Windows pode avisar que protegeu o computador, porque o instalador ainda não tem
+          assinatura digital. Clique em <b>Mais informações</b> e depois em <b>Executar assim mesmo</b>.
+          <a href="#perguntas">Por que isso acontece?</a></p>
       </div>
-      <figure class="hero-shot">
-        <img src="img/biblioteca.jpg" alt="Biblioteca do RecompHUB com quatro jogos instalados" width="800" height="500">
-      </figure>
+      <dl class="spec">
+        <div><dt>Preço</dt><dd>Grátis</dd></div>
+        <div><dt>Código</dt><dd>Aberto, licença MIT</dd></div>
+        <div><dt>Sistema</dt><dd>Windows 10 e 11</dd></div>
+        <div><dt>Conta</dt><dd>Não precisa</dd></div>
+        <div><dt>Jogos</dt><dd>Nenhum incluso: você usa a sua cópia</dd></div>
+        <div><dt>Ports</dt><dd>Das páginas oficiais de cada projeto</dd></div>
+      </dl>
     </section>
 
-    <section class="principles">
-      <div>
-        <h3>Só ports oficiais</h3>
-        <p>Cada port vem da página de releases do próprio projeto no GitHub. Nada de espelhos nem de arquivos de terceiros.</p>
-      </div>
-      <div>
-        <h3>Sua cópia, conferida</h3>
-        <p>O RecompHUB nunca baixa jogos. Você usa os arquivos da sua cópia, e ele confere se é a versão certa antes de jogar.</p>
-      </div>
-      <div>
-        <h3>Crédito a quem fez</h3>
-        <p>Todo port mostra quem fez e leva para a página do projeto. O mérito é das comunidades de decompilação e recompilação.</p>
-      </div>
+    <figure class="shot">
+      <img src="img/biblioteca.jpg" alt="Biblioteca do RecompHUB com quatro jogos instalados" width="1600" height="1000">
+      <figcaption><span>Fig. 1</span> A biblioteca, com os ports instalados e o tempo de cada um.</figcaption>
+    </figure>
+
+    <section class="origin">
+      <h2>De onde vem cada coisa</h2>
+      <p>Os ports são feitos por comunidades de decompilação e recompilação, e o RecompHUB baixa cada um da página de
+        versões do próprio projeto no GitHub. Ele nunca baixa jogos nem diz onde encontrá-los: o port só abre com a ROM ou o
+        dump da sua cópia, e o RecompHUB confere se é a versão que o port espera. Todo port mostra quem fez e tem um link
+        para a página do projeto.</p>
     </section>
 
     <section id="recursos" class="features">
       <h2>O que ele faz</h2>
 
       <article class="feature">
+        <h3>Biblioteca e Modo TV</h3>
         <div class="feature-text">
-          <h3>Biblioteca, Modo TV e um botão Jogar</h3>
-          <p>Instale, atualize e jogue cada port com um clique. O tempo de jogo é contado sozinho, os atalhos vão para a área de
-            trabalho e o Modo TV funciona com controle, como um console.</p>
-          <ul>
-            <li>Escolha a versão do port ou volte para uma anterior</li>
-            <li>Jogos que pedem administrador abrem pedindo a permissão do Windows</li>
-            <li>Também guarda seus outros jogos de PC</li>
-          </ul>
+          <p>Cada port instalado aparece com capa, tempo de jogo e o botão Jogar. Dá para escolher a versão do port, voltar
+            para uma anterior e criar atalhos na área de trabalho, no menu Iniciar ou na Steam. O Modo TV ocupa a tela
+            inteira e funciona com controle.</p>
+          <p>Jogos que pedem administrador abrem com o pedido de permissão do Windows. Seus outros jogos de PC também
+            podem entrar na biblioteca, só para contar o tempo.</p>
         </div>
-        <img src="img/biblioteca.jpg" alt="Biblioteca" loading="lazy" width="800" height="500">
-      </article>
-
-      <article class="feature flip">
-        <div class="feature-text">
-          <h3>Central de Mods</h3>
-          <p>Centenas de mods da comunidade, direto da Thunderstore: instale com um clique, já com as dependências, e ligue ou
-            desligue quando quiser.</p>
-          <ul>
-            <li>Mods diferentes para cada perfil</li>
-            <li>Coleções com nome, como "Minha run HD"</li>
-            <li>Backup dos saves antes de ligar qualquer mod</li>
-          </ul>
-        </div>
-        <img src="img/mods.jpg" alt="Central de Mods" loading="lazy" width="800" height="500">
+        <img src="img/biblioteca.jpg" alt="" loading="lazy" width="1600" height="1000">
       </article>
 
       <article class="feature">
+        <h3>Central de Mods</h3>
         <div class="feature-text">
-          <h3>Conquistas com aviso por cima do jogo</h3>
-          <p>Conquistas por tempo de jogo e pelo progresso lido do seu save, como Jiggies e notas no Banjo-Kazooie, com aviso e
-            som no canto da tela.</p>
-          <ul>
-            <li>Mostra também o que você já ganhou no RetroAchievements jogando o original</li>
-            <li>O save é só lido, nunca alterado</li>
-          </ul>
+          <p>Os mods de Majora's Mask e Banjo-Kazooie vêm da Thunderstore. O RecompHUB instala cada mod com as dependências,
+            liga e desliga quando você quiser e guarda uma combinação de mods para cada perfil.</p>
+          <p>Antes de ligar um mod, ele faz backup dos saves.</p>
         </div>
-        <img src="img/conquistas.jpg" alt="Conquistas" loading="lazy" width="800" height="500">
+        <img src="img/mods.jpg" alt="" loading="lazy" width="1600" height="1000">
       </article>
 
-      <article class="feature flip">
+      <article class="feature">
+        <h3>Conquistas</h3>
         <div class="feature-text">
-          <h3>Perfis, histórico e estatísticas</h3>
-          <p>Cada pessoa da casa com o próprio perfil, tempo de jogo, conquistas e até saves separados. Gráficos dos últimos dias e
-            semanas, jogos mais jogados e dias seguidos jogando.</p>
-          <ul>
-            <li>"Quem vai jogar?" ao abrir, também pelo controle</li>
-            <li>Estado de cada jogo: jogando, zerado, 100%…</li>
-          </ul>
+          <p>Algumas conquistas contam tempo e sessões. No Banjo-Kazooie ele também lê do save quantos Jiggies e notas
+            você pegou, sem alterar nada. O aviso aparece no canto da tela durante o jogo.</p>
+          <p>Se você tem conta no RetroAchievements, ele mostra o que você já ganhou jogando o original. Jogar o port não
+            desbloqueia nada lá.</p>
         </div>
-        <img src="img/estatisticas.jpg" alt="Estatísticas" loading="lazy" width="800" height="500">
+        <img src="img/conquistas.jpg" alt="" loading="lazy" width="1600" height="1000">
       </article>
 
-      <div class="grid-small">
-        <div><h4>Saves seguros</h4><p>Backup automático quando o jogo fecha, só se algo mudou. Restaurar troca a pasta inteira, com cópia antes.</p></div>
-        <div><h4>Arraste a ROM</h4><p>Solte o arquivo na janela ou deixe o RecompHUB procurar na pasta Downloads. A versão é conferida como o port confere.</p></div>
-        <div><h4>Capas e descrições</h4><p>Capas, banners e descrições da SteamGridDB e da IGDB, com a sua chave, guardados no PC.</p></div>
-        <div><h4>Aba Comunidade</h4><p>Mais de 100 ports da comunidade, da lista awesome-unofficial-pc-ports e do GitHub, com instalação experimental e aviso.</p></div>
-      </div>
+      <article class="feature">
+        <h3>Perfis e estatísticas</h3>
+        <div class="feature-text">
+          <p>Cada pessoa da casa pode ter um perfil com o próprio tempo de jogo, conquistas e saves. Ao abrir, o RecompHUB
+            pergunta quem vai jogar, e dá para responder pelo controle.</p>
+          <p>A página de estatísticas mostra os dias e as semanas jogados e quais jogos você mais abriu.</p>
+        </div>
+        <img src="img/estatisticas.jpg" alt="" loading="lazy" width="1600" height="1000">
+      </article>
+
+      <dl class="extras">
+        <div><dt>Saves</dt><dd>Backup quando o jogo fecha, só se o save mudou. Restaurar guarda uma cópia do que estava lá antes.</dd></div>
+        <div><dt>Arquivos do jogo</dt><dd>Solte a ROM na janela ou deixe o RecompHUB procurar na pasta Downloads.</dd></div>
+        <div><dt>Capas</dt><dd>Da SteamGridDB e da IGDB, com uma chave gratuita sua. Ficam guardadas no PC.</dd></div>
+        <div><dt>Comunidade</dt><dd>Mais de 100 ports de outros projetos, com instalação experimental e aviso.</dd></div>
+      </dl>
     </section>
 
     <section id="ports" class="ports">
       <h2>Ports com suporte completo</h2>
-      <p class="sub">Arquivos conferidos, instalação e atualização pelo RecompHUB. A lista cresce a cada versão.</p>
-      <div class="port-grid" id="port-grid"></div>
+      <p class="sub">Nestes, o RecompHUB instala, atualiza e confere os arquivos. A lista cresce a cada versão.</p>
+      <div id="port-table"></div>
     </section>
 
     <section id="comecar" class="steps">
       <h2>Como começar</h2>
       <ol>
-        <li><b>Baixe e instale o RecompHUB.</b> Não precisa de administrador.</li>
+        <li><b>Instale o RecompHUB.</b> Não precisa de administrador.</li>
         <li><b>Escolha um port e clique em Instalar.</b> Ele vem da página oficial do projeto.</li>
-        <li><b>Forneça os arquivos da sua cópia.</b> A ROM do seu cartucho ou o dump do seu console. O RecompHUB mostra como
-          fazer e confere se é a versão certa.</li>
-        <li><b>Jogue.</b> Tempo, saves, conquistas e mods ficam com o RecompHUB.</li>
+        <li><b>Mostre onde estão os arquivos da sua cópia.</b> A ROM do seu cartucho ou o dump do seu console. Cada port
+          explica como fazer a cópia, e o RecompHUB confere se é a versão certa.</li>
+        <li><b>Clique em Jogar.</b></li>
       </ol>
     </section>
 
@@ -149,8 +139,8 @@
       <h2>Perguntas</h2>
       <details>
         <summary>Isso é pirataria?</summary>
-        <p>Não. Os ports são projetos de código aberto feitos pela comunidade, e nenhum traz os arquivos do jogo. Você precisa da
-          sua própria cópia: o RecompHUB nunca baixa, hospeda ou indica onde baixar jogos.</p>
+        <p>Não. Os ports são projetos de código aberto da comunidade e nenhum traz os arquivos do jogo. Você precisa da
+          sua própria cópia, e o RecompHUB nunca baixa, hospeda ou indica onde baixar jogos.</p>
       </details>
       <details>
         <summary>Por que o Windows mostra um aviso ao instalar?</summary>
@@ -159,28 +149,28 @@
       </details>
       <details>
         <summary>Como faço a ROM ou o dump do meu jogo?</summary>
-        <p>Cada port tem a seção "Como obter seus arquivos" dentro do programa, com o caminho para fazer a cópia do seu cartucho ou
-          console (por exemplo, com um leitor de cartuchos).</p>
+        <p>Cada port tem a seção "Como obter seus arquivos" dentro do programa, com o caminho para copiar o jogo do seu
+          cartucho ou console, por exemplo com um leitor de cartuchos.</p>
       </details>
       <details>
         <summary>E os meus saves?</summary>
-        <p>Ficam onde o port guarda. O RecompHUB faz backup automático quando o jogo fecha, guarda os saves ao desinstalar e
-          devolve ao instalar de novo, e tem "Backup dos saves" em .zip.</p>
+        <p>Ficam onde o port guarda. O RecompHUB faz backup quando o jogo fecha, guarda os saves ao desinstalar e devolve
+          quando você instala de novo.</p>
       </details>
       <details>
         <summary>Os mods são seguros?</summary>
-        <p>Mods são programas da comunidade. O RecompHUB só baixa da Thunderstore, mostra autor e página, confere se o mod é do
-          jogo certo e faz backup dos saves antes de ligar. Instale mods de quem você confia.</p>
+        <p>Mods são programas da comunidade. O RecompHUB só baixa da Thunderstore, mostra o autor, confere se o mod é do jogo
+          certo e faz backup dos saves antes de ligar. Instale mods de quem você confia.</p>
       </details>
       <details>
         <summary>As conquistas são do RetroAchievements?</summary>
-        <p>Não. As conquistas são do próprio RecompHUB. Do RetroAchievements ele só mostra, se você quiser, o que você ganhou
-          jogando o original em emuladores; jogar o port não desbloqueia nada lá.</p>
+        <p>Não, são do próprio RecompHUB. Do RetroAchievements ele só mostra, se você quiser, o que você ganhou jogando o
+          original em emuladores.</p>
       </details>
       <details>
-        <summary>É de graça? Coleta meus dados?</summary>
-        <p>É de graça e de código aberto. Não há conta nem coleta de dados: tudo fica no seu PC. Ele só acessa o GitHub dos
-          projetos e, quando você usa, a Thunderstore, a SteamGridDB, a IGDB e o RetroAchievements.</p>
+        <summary>Coleta meus dados?</summary>
+        <p>Não há conta nem coleta de dados, e tudo fica no seu PC. Ele só acessa o GitHub dos projetos e, quando você usa,
+          a Thunderstore, a SteamGridDB, a IGDB e o RetroAchievements.</p>
       </details>
     </section>
 
@@ -188,7 +178,7 @@
       <h2>Apoie o projeto</h2>
       <p class="sub" id="apoie-msg"></p>
       <div class="donate-grid" id="apoie-opcoes"></div>
-      <p class="fine">Doar é opcional: o RecompHUB continua grátis e completo para todo mundo.</p>
+      <p class="fine">Doar é opcional. O RecompHUB continua grátis e completo para todo mundo.</p>
     </section>
 
     <section id="novidades" class="news">
@@ -198,10 +188,10 @@
   </main>
 
   <footer>
-    <p><b>RecompHUB</b> é um projeto independente de código aberto. Os ports pertencem aos seus autores, com crédito em cada
-      página. Todas as marcas e jogos pertencem aos seus donos; o RecompHUB não tem ligação com Nintendo, Sony, Microsoft ou
-      outras empresas, e não distribui arquivos de jogos.</p>
-    <p><a href="https://github.com/recomphub-app/recomphub">GitHub</a> ·
+    <p>O RecompHUB é um projeto independente de código aberto. Os ports pertencem aos seus autores, com crédito em cada
+      página. Marcas e jogos pertencem aos seus donos. O RecompHUB não tem ligação com Nintendo, Sony, Microsoft ou outras
+      empresas e não distribui arquivos de jogos.</p>
+    <p><a href="https://github.com/recomphub-app/recomphub">Código no GitHub</a> ·
       <a href="https://github.com/recomphub-app/recomphub/issues">Relatar um problema</a> ·
       <a href="https://github.com/recomphub-app/recomphub/releases">Todas as versões</a></p>
   </footer>

@@ -23,18 +23,19 @@ async function download() {
 }
 
 async function ports() {
-  const grid = document.getElementById('port-grid');
+  const box = document.getElementById("port-table");
   try {
-    const c = await (await fetch('catalog.json')).json();
-    grid.innerHTML = c.ports.map((p) => `
-      <div class="port">
-        <span class="fam">${esc(p.family)}</span>
-        <b>${esc(p.title)}</b>
-        <span class="by">${esc(p.port_name)}, por ${esc(p.port_authors)}</span>
-        <a href="${esc(p.project_url)}">Página do projeto →</a>
-      </div>`).join('');
+    const c = await (await fetch("catalog.json")).json();
+    box.innerHTML = `<table class="port-table">
+      <thead><tr><th>Jogo</th><th>Port</th><th>Você fornece</th></tr></thead>
+      <tbody>${c.ports.map((p) => `
+        <tr>
+          <td>${esc(p.title)} <span class="sys">${esc(p.family)}</span></td>
+          <td><a href="${esc(p.project_url)}">${esc(p.port_name)}</a><span class="by">${esc(p.port_authors)}</span></td>
+          <td class="needs">${esc(p.needs)}</td>
+        </tr>`).join("")}</tbody></table>`;
   } catch {
-    grid.innerHTML = '<p class="sub">Veja a lista de ports dentro do programa, na aba Descobrir.</p>';
+    box.innerHTML = "<p class=\"sub\">Veja a lista de ports dentro do programa, na aba Descobrir.</p>";
   }
 }
 
@@ -81,7 +82,7 @@ async function donations() {
         <b>Pix</b>
         <span class="muted">${esc(pix.nome || 'Chave Pix')}</span>
         <code id="pix-key">${esc(pix.chave)}</code>
-        <button class="btn small primary" id="pix-copy">Copiar chave</button>
+        <button class="btn" id="pix-copy">Copiar chave</button>
       </div>`);
   }
   for (const l of links) {
