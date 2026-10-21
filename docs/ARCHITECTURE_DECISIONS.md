@@ -252,9 +252,11 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
 ## Ports que mudam de nome e cache de shaders (v0.23)
 
 50. **Mudança de nome sem perder ninguém.** O gow3_pc virou SpartanPort (repositório, arquivo do
-    release, programa e lugar das configurações). O catálogo usa os nomes novos e guarda os
-    antigos (`legacy_exe`, `legacy_markers`), para uma instalação antiga continuar reconhecida e
-    jogável até a atualização. O caminho antigo das configurações fica em `settings_file`, que as
+    release, programa e lugar das configurações). O catálogo usa os nomes novos e guarda o
+    programa antigo (`legacy_exe`), para uma instalação antiga continuar jogável até a atualização.
+    Os marcadores são `run.py` e `scripts/prepare.py`, presentes em todas as versões de Windows,
+    da gow3_pc 2.0 à SpartanPort 2.6.0, então até versões antigas do RecompHUB reconhecem as duas
+    (`legacy_markers` existe para quando não houver arquivos em comum). O caminho antigo das configurações fica em `settings_file`, que as
     versões antigas do RecompHUB entendem, e o novo em `portable_settings_file`; assim quem ainda
     não atualizou o RecompHUB continua vendo o jogo e já recebe o download certo. Os dados vêm do
     código do projeto (`legacy.py`, `USER_FILES` do launcher), não de suposição.

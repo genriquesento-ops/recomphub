@@ -371,18 +371,19 @@ mod tests {
         let g = games.iter().find(|g| g.id == "gow3").unwrap();
         let dir = std::env::temp_dir().join(format!("recomphub-rename-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("bin")).unwrap();
-        for f in &g.legacy_markers {
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        for f in g.markers.iter().chain(g.legacy_exe.iter()) {
             std::fs::write(dir.join(f), b"x").unwrap();
         }
         // Before the update: recognised, and Play opens the old program.
         assert!(g.matches(&dir));
         assert_eq!(g.program_in(&dir), g.legacy_exe.clone().unwrap());
         // After the update: the new program wins.
-        for f in &g.markers {
-            std::fs::write(dir.join(f), b"x").unwrap();
-        }
+        std::fs::write(dir.join(&g.exe), b"x").unwrap();
         assert_eq!(g.program_in(&dir), g.exe);
+        // A folder with only the legacy markers of another kind of port still matches by them.
+        let other = GameDef { markers: vec!["novo.exe".into()], legacy_markers: vec!["run.py".into()], ..g.clone() };
+        assert!(other.matches(&dir));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

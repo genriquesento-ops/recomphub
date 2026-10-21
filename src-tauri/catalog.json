@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "revision": 5,
+  "revision": 6,
   "ports": [
     {
       "id": "gow3",
@@ -17,8 +17,7 @@
       "exe": "Play SpartanPort.exe",
       "legacy_exe": "Play God of War III.exe",
       "icon": "launcher/spartanport.ico",
-      "markers": ["Play SpartanPort.exe", "bin/spartanport-probe.exe"],
-      "legacy_markers": ["Play God of War III.exe", "bin/gow3-probe.exe"],
+      "markers": ["run.py", "scripts/prepare.py"],
       "keep_on_update": ["user/", "out/", "mods/", "spartanport.ini", "settings.json", "game_icon.ico", "mods.json", "mods_presets.json", "patches.json", "last_run.log", "gow3.ini"],
       "shader_cache": ["{install}\\user\\cache"],
       "requirements": "Windows 10 (1903 ou mais novo) ou 11, 64-bit, processador com AVX e placa de vídeo com Vulkan 1.3 e driver atual.",
