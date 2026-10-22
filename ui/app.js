@@ -90,12 +90,30 @@ function chips(g) {
 }
 
 // Library tabs show what the player has; Descobrir shows the catalog's other ports.
-function inTab(g) {
-  if (tab === 'discover') return g.kind === 'port' && !g.in_library;
+function inTab(g, t = tab) {
+  if (t === 'discover') return g.kind === 'port' && !g.in_library;
   if (!g.in_library) return false;
   if (g.hidden && !settings.show_hidden) return false;
-  if (tab === 'port') return g.kind === 'port' || g.kind === 'community';
-  return tab === 'all' || g.kind === tab;
+  if (t === 'port') return g.kind === 'port' || g.kind === 'community';
+  return t === 'all' || g.kind === t;
+}
+
+// The tabs show how many games each one has.
+function markTabs() {
+  document.querySelectorAll('#tabs button').forEach((b) => {
+    const t = b.dataset.tab;
+    const n = t === 'community' ? (communityData ? communityData.items.length : null) : games.filter((g) => inTab(g, t)).length;
+    if (!b.dataset.label) b.dataset.label = b.textContent;
+    b.innerHTML = `${esc(b.dataset.label)}${n === null ? '' : ` <span class="count">${n}</span>`}`;
+    b.classList.toggle('on', t === tab);
+  });
+}
+
+// A dropdown filter: [label, current value, options as [value, text], on change].
+function selectHtml(id, label, current, options) {
+  return `<label class="filter">${label}
+    <select id="${id}">${options.map(([v, text]) =>
+      `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(text)}</option>`).join('')}</select></label>`;
 }
 
 // Favorites first, then the most recently played (as Ports Launcher), then by name.
@@ -121,15 +139,16 @@ function visibleGames() {
 }
 
 function renderTabs() {
-  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  const tags = [...new Set(games.filter(inTab).flatMap(tagsOf))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  markTabs();
+  const shown = games.filter((g) => inTab(g));
+  const tags = [...new Set(shown.flatMap(tagsOf))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   if (tagFilter && !tags.includes(tagFilter)) tagFilter = null;
-  $('#tagbar').innerHTML = tags.map((t) =>
-    `<button class="tag${t === tagFilter ? ' on' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
-  document.querySelectorAll('#tagbar .tag').forEach((b) => b.addEventListener('click', () => {
-    tagFilter = tagFilter === b.dataset.tag ? null : b.dataset.tag;
-    render();
-  }));
+  const discover = tab === 'discover';
+  const count = (t) => shown.filter((g) => tagsOf(g).includes(t)).length;
+  $('#tagbar').innerHTML = tags.length ? selectHtml('tag-select', discover ? 'Console' : 'Etiqueta', tagFilter || '',
+    [['', discover ? 'Todos' : 'Todas'], ...tags.map((t) => [t, `${t} (${count(t)})`])]) : '';
+  const sel = $('#tag-select');
+  if (sel) sel.addEventListener('change', () => { tagFilter = sel.value || null; render(); });
 }
 
 function renderGrid() {
@@ -142,9 +161,9 @@ function renderGrid() {
   if (!list.length) {
     const filtered = tagFilter || search;
     empty.textContent = filtered ? 'Nenhum jogo com esse filtro.'
-      : tab === 'pc_game' ? 'Nenhum jogo de PC ainda. Use "Adicionar jogo de PC" e escolha o programa (.exe) de um jogo que você já tem instalado.'
+      : tab === 'pc_game' ? 'Nenhum jogo de PC ainda. Use Adicionar > Jogo de PC e escolha o programa (.exe) de um jogo que você já tem instalado.'
       : tab === 'discover' ? 'Você já tem todos os ports do catálogo na biblioteca.'
-      : 'Sua biblioteca está vazia. Veja os ports disponíveis na aba "Descobrir", ou use "Adicionar port" se já tiver um instalado.';
+      : 'Sua biblioteca está vazia. Veja os ports disponíveis na aba Descobrir, ou use Adicionar > Port que já está no PC.';
   }
   $('#grid').innerHTML = list.map((g) => `
     <div class="card" data-id="${g.id}">
@@ -2583,7 +2602,7 @@ $('#btn-add').addEventListener('click', addExisting);
 $('#btn-add-pc').addEventListener('click', addPcGame);
 $('#btn-covers').addEventListener('click', openCovers);
 $('#btn-backup').addEventListener('click', backupSaves);
-document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => {
+document.querySelectorAll('#tabs button[data-tab]').forEach((b) => b.addEventListener('click', () => {
   tab = b.dataset.tab;
   tagFilter = null;
   render();
@@ -2718,6 +2737,29 @@ async function loadCommunity(force) {
   }
 }
 
+let communitySort = 'recommended';
+const COMMUNITY_SORTS = [
+  ['recommended', 'Recomendados'],
+  ['trending', 'Em alta'],
+  ['stars', 'Mais estrelas'],
+  ['updated', 'Atualizados há pouco'],
+  ['name', 'Nome (A–Z)'],
+];
+const byName = (a, b) => (a.game || a.name).localeCompare(b.game || b.name, 'pt-BR');
+// "Em alta": stars that keep counting while the project is alive. A project pushed today keeps
+// all of them; one untouched for a month, half; for a year, about a twelfth.
+function trending(i) {
+  const days = i.pushed ? Math.max(0, (Date.now() / 1000 - i.pushed) / 86400) : 3650;
+  return ((i.stars || 0) + 1) / (1 + days / 30);
+}
+const COMMUNITY_ORDER = {
+  recommended: (a, b) => (b.recommended - a.recommended) || ((b.stars || 0) - (a.stars || 0)) || byName(a, b),
+  trending: (a, b) => trending(b) - trending(a) || byName(a, b),
+  stars: (a, b) => ((b.stars || 0) - (a.stars || 0)) || byName(a, b),
+  updated: (a, b) => ((b.pushed || 0) - (a.pushed || 0)) || byName(a, b),
+  name: byName,
+};
+
 function communityMatches(i) {
   if (tagFilter && i.console !== tagFilter) return false;
   if (!search) return true;
@@ -2726,20 +2768,24 @@ function communityMatches(i) {
 }
 
 function renderCommunityGrid() {
-  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  markTabs();
   const head = $('#community-head');
   head.hidden = false;
   if (!communityData && !communityLoading) loadCommunity(false);
   if (!communityArt) loadCommunityArt();
   const data = communityData || { items: [], errors: [], fetched_at: 0 };
   head.innerHTML = `
-    <p>Ports feitos pela comunidade, puxados direto do GitHub: a lista
-      <button class="link" data-clink="${esc(data.list_page || '')}">awesome-unofficial-pc-ports</button>
-      e os tópicos <code>pc-port</code>, <code>native-port</code>, <code>n64recomp</code>, <code>xenonrecomp</code> e <code>ps3recomp</code>.
-      <b>Eles não foram verificados pelo RecompHUB.</b> Os marcados "No catálogo" têm a versão verificada na aba Descobrir.</p>
-    <div class="row">
-      <button data-cact="refresh" ${communityLoading ? 'disabled' : ''}>${communityLoading ? 'Buscando no GitHub…' : 'Atualizar lista'}</button>
-      ${data.fetched_at ? `<span class="muted">Atualizada em ${lastPlayed(data.fetched_at)} · ${data.items.length} ports</span>` : ''}
+    <p>Ports feitos pela comunidade e achados no GitHub. <b>Não foram verificados pelo RecompHUB</b>: instale só de projetos em
+      que você confia. Os marcados "No catálogo" têm a versão verificada em Descobrir.</p>
+    <div class="row community-meta">
+      ${data.fetched_at ? `<span class="muted">Lista de ${lastPlayed(data.fetched_at)}</span>` : ''}
+      <button class="ghost" data-cact="refresh" ${communityLoading ? 'disabled' : ''}>${communityLoading ? 'Buscando no GitHub…' : 'Atualizar'}</button>
+      <details class="sources">
+        <summary>De onde vem esta lista?</summary>
+        <p class="muted">Da lista <button class="link" data-clink="${esc(data.list_page || '')}">awesome-unofficial-pc-ports</button>
+          e dos projetos do GitHub com os tópicos <code>pc-port</code>, <code>native-port</code>, <code>n64recomp</code>,
+          <code>xenonrecomp</code> e <code>ps3recomp</code>.</p>
+      </details>
     </div>
     ${data.errors.length ? `<p class="muted">Não consegui ler: ${data.errors.map(esc).join('; ')}.</p>` : ''}`;
   head.querySelector('[data-cact=refresh]').addEventListener('click', () => loadCommunity(true));
@@ -2748,15 +2794,14 @@ function renderCommunityGrid() {
 
   const consoles = [...new Set(data.items.map((i) => i.console).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   if (tagFilter && !consoles.includes(tagFilter)) tagFilter = null;
-  $('#tagbar').innerHTML = consoles.map((t) =>
-    `<button class="tag${t === tagFilter ? ' on' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
-  document.querySelectorAll('#tagbar .tag').forEach((b) => b.addEventListener('click', () => {
-    tagFilter = tagFilter === b.dataset.tag ? null : b.dataset.tag;
-    render();
-  }));
+  const perConsole = (c) => data.items.filter((i) => i.console === c).length;
+  $('#tagbar').innerHTML = selectHtml('console-select', 'Console', tagFilter || '',
+    [['', `Todos (${data.items.length})`], ...consoles.map((c) => [c, `${c} (${perConsole(c)})`])])
+    + selectHtml('sort-select', 'Ordenar', communitySort, COMMUNITY_SORTS);
+  $('#console-select').addEventListener('change', (e) => { tagFilter = e.target.value || null; render(); });
+  $('#sort-select').addEventListener('change', (e) => { communitySort = e.target.value; render(); });
 
-  const list = data.items.filter(communityMatches)
-    .sort((a, b) => (b.recommended - a.recommended) || ((b.stars || 0) - (a.stars || 0)) || a.name.localeCompare(b.name));
+  const list = data.items.filter(communityMatches).sort(COMMUNITY_ORDER[communitySort] || COMMUNITY_ORDER.recommended);
   const empty = $('#empty');
   empty.hidden = list.length > 0 || communityLoading;
   empty.textContent = data.items.length ? 'Nenhum port com esse filtro.' : 'Nenhum port carregado. Verifique a internet e clique em "Atualizar lista".';

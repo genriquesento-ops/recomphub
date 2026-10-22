@@ -479,3 +479,20 @@ button.small { font-size: 12px; padding: 4px 10px; }
 .tour-nav .grow { flex: 1; }
 .topbar .actions { flex-wrap: nowrap; }
 .topbar .profile-chip span { white-space: nowrap; }
+
+/* Library: tabs with counts, then one toolbar (search, filters) instead of rows of chips */
+.tabs .count { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 3px; }
+.tabs button.on .count { color: var(--red); }
+.tab-sep { width: 1px; height: 18px; background: var(--line); margin: 0 10px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; margin: 4px 0 22px; }
+.toolbar #search { margin: 0; flex: 1 1 220px; max-width: 360px; min-width: 180px; }
+.filters { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; margin: 0; }
+.filters:empty { display: none; }
+.filter { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.filter select { min-width: 170px; }
+.community-head { margin: 10px 0 14px; max-width: 900px; }
+.community-head p { margin: 4px 0; }
+.community-meta { margin: 6px 0 0; gap: 14px; }
+.community-meta .sources summary { cursor: pointer; color: var(--muted); }
+.community-meta .sources summary:hover { color: var(--text); }
+.community-meta .sources[open] { flex-basis: 100%; }

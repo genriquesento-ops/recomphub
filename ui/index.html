@@ -43,13 +43,16 @@
       <div class="tabs" id="tabs">
         <button data-tab="all">Todos</button>
         <button data-tab="port">Ports</button>
-        <button data-tab="pc_game">Outros jogos de PC</button>
+        <button data-tab="pc_game">Jogos de PC</button>
+        <span class="tab-sep" aria-hidden="true"></span>
         <button data-tab="discover">Descobrir</button>
         <button data-tab="community">Comunidade</button>
-        <input type="search" id="search" placeholder="Buscar por nome, port ou etiqueta">
       </div>
-      <div id="community-head" class="box" hidden></div>
-      <div class="tagbar" id="tagbar"></div>
+      <div id="community-head" class="community-head" hidden></div>
+      <div class="toolbar">
+        <input type="search" id="search" placeholder="Buscar">
+        <div class="filters" id="tagbar"></div>
+      </div>
       <div id="grid" class="grid"></div>
       <p id="empty" class="muted" hidden></p>
     </section>
