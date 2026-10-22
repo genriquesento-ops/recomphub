@@ -431,3 +431,7 @@ button.small { font-size: 12px; padding: 4px 10px; }
 .community-shot { margin: 12px 0; max-width: 360px; }
 .community-shot img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid var(--line); display: block; }
 .community-shot figcaption { font-size: 12px; margin-top: 4px; }
+
+/* "O jogo fechou com erro": the report people paste into an issue */
+.crash-report { max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px;
+  padding: 8px; border: 1px solid var(--line); margin: 6px 0; }

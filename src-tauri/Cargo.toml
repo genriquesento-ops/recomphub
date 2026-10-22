@@ -1,6 +1,6 @@
 [package]
 name = "recomphub"
-version = "0.25.0"
+version = "0.26.0"
 description = "Launcher for native ports of console games"
 edition = "2021"
 license = "MIT"

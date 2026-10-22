@@ -4,7 +4,7 @@
 //! (gow3_pc starts bin\gow3-probe.exe); the session lasts while any of them runs. Play time
 //! is written every 30 seconds, so a crash or closing RecompHUB loses little.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
@@ -41,6 +41,12 @@ pub struct Session {
 pub struct Sessions {
     pub running: HashMap<String, Session>,
     launching: HashMap<String, Instant>,
+    /// Programs RecompHUB started, to read how they ended (diagnose.rs).
+    children: HashMap<String, std::process::Child>,
+    /// Crash code of the started program, kept until its session ends.
+    exit_codes: HashMap<String, u32>,
+    /// Closed by "Fechar jogo": not an error.
+    stopped: HashSet<String>,
 }
 
 impl Sessions {
@@ -50,6 +56,10 @@ impl Sessions {
 
     pub fn is_launching(&self, id: &str) -> bool {
         self.launching.get(id).map(|t| t.elapsed() < START_TIMEOUT).unwrap_or(false)
+    }
+
+    pub fn mark_stopped(&mut self, id: &str) {
+        self.stopped.insert(id.to_string());
     }
 
     pub fn started(&self, id: &str) -> Option<u64> {
@@ -154,9 +164,33 @@ fn tick(app: &AppHandle, sys: &System) {
     let mut records = Vec::new();
     let mut check_saves = Vec::new();
     let profile = state.profiles.lock().unwrap().active.clone();
+    // Started programs that died before their session was seen (a missing DLL ends the
+    // program at once): (id, crash code, seconds).
+    let mut failed = Vec::new();
+    // Ended sessions to look at: (id, start, seconds, crash code, closed by "Fechar jogo").
+    let mut checks = Vec::new();
     let credits = {
         let mut guard = state.sessions.lock().unwrap();
         let s = &mut *guard;
+        let mut exited = Vec::new();
+        for (id, child) in s.children.iter_mut() {
+            if let Ok(Some(status)) = child.try_wait() {
+                exited.push((id.clone(), status.code().map(|c| c as u32)));
+            }
+        }
+        for (id, code) in exited {
+            s.children.remove(&id);
+            // Only a crash code counts: a launcher may quit with a code of its own after
+            // handing over to the game.
+            let Some(code) = code.filter(|c| crate::diagnose::is_crash_code(*c)) else { continue };
+            if s.running.contains_key(&id) {
+                s.exit_codes.insert(id, code);
+            } else if let Some(t) = s.launching.remove(&id) {
+                if !s.stopped.remove(&id) {
+                    failed.push((id, code, t.elapsed().as_secs()));
+                }
+            }
+        }
         for (id, prefix, name) in &folders {
             let running = !processes_in(sys, prefix, name.as_deref()).is_empty();
             match (s.running.get_mut(id), running) {
@@ -192,6 +226,8 @@ fn tick(app: &AppHandle, sys: &System) {
                     credits.push((id.clone(), secs));
                 }
                 records.push(record(id, &sess, &profile));
+                s.children.remove(id);
+                checks.push((id.clone(), sess.started, now().saturating_sub(sess.started), s.exit_codes.remove(id), s.stopped.remove(id)));
             }
         }
         credits
@@ -208,11 +244,26 @@ fn tick(app: &AppHandle, sys: &System) {
     if !started.is_empty() || !ended.is_empty() {
         crate::tray::refresh(app);
     }
-    for (id, _) in &ended {
-        crate::fps::stop(app, Some(id));
-        let (app, id) = (app.clone(), id.clone());
-        // Reading the drivers can take a second the first time; not on the watcher's pace.
-        std::thread::spawn(move || crate::remember_shader_driver(&app, &id));
+    for (id, start, seconds, code, stopped) in checks {
+        crate::fps::stop(app, Some(&id));
+        let app = app.clone();
+        // Windows' error records and the drivers take a second to read; not on the watcher's
+        // pace. The drivers are remembered only after a session that ended well, so "the
+        // driver changed since it last worked" stays true after a crash.
+        std::thread::spawn(move || {
+            let crashed = !stopped && crate::check_crash(&app, &id, start, Some(seconds), code, false).is_some();
+            if !crashed {
+                crate::remember_shader_driver(&app, &id);
+            }
+        });
+    }
+    for (id, code, seconds) in failed {
+        let app2 = app.clone();
+        let id2 = id.clone();
+        std::thread::spawn(move || {
+            crate::check_crash(&app2, &id2, now().saturating_sub(seconds), Some(seconds), Some(code), false);
+        });
+        let _ = app.emit("session", serde_json::json!({ "id": id, "state": "ended", "seconds": 0 }));
     }
     for id in started {
         if let Some(name) = folders.iter().find(|(i, _, _)| *i == id).and_then(|(_, _, n)| n.clone()) {
@@ -518,6 +569,7 @@ pub fn start(
     let args = split_args(args);
     let env: Vec<(String, String)> =
         env.iter().filter(|v| valid_env_name(&v.name)).map(|v| (v.name.clone(), v.value.clone())).collect();
+    let mut child = None;
     let started = if as_admin {
         start_as_admin(&exe_path, install_dir, &args, &env)?;
         Started::Admin
@@ -526,7 +578,10 @@ pub fn start(
         cmd.current_dir(install_dir).args(&args);
         cmd.envs(env.iter().map(|(k, v)| (k, v)));
         match cmd.spawn() {
-            Ok(_) => Started::Normal,
+            Ok(c) => {
+                child = Some(c);
+                Started::Normal
+            }
             // The program asks for administrator: ask Windows for it (UAC) instead of failing.
             Err(e) if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
                 start_as_admin(&exe_path, install_dir, &args, &env)?;
@@ -535,7 +590,21 @@ pub fn start(
             Err(e) => return Err(antivirus_error(&e).unwrap_or_else(|| format!("O Windows não abriu o jogo: {e}"))),
         }
     };
-    app.state::<AppState>().sessions.lock().unwrap().launching.insert(id.to_string(), Instant::now());
+    {
+        let state = app.state::<AppState>();
+        let mut s = state.sessions.lock().unwrap();
+        s.launching.insert(id.to_string(), Instant::now());
+        s.stopped.remove(id);
+        s.exit_codes.remove(id);
+        match child {
+            Some(c) => {
+                s.children.insert(id.to_string(), c);
+            }
+            None => {
+                s.children.remove(id);
+            }
+        }
+    }
     let _ = app.emit("session", serde_json::json!({ "id": id, "state": "starting" }));
     Ok(started)
 }

@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "revision": 6,
+  "revision": 7,
   "ports": [
     {
       "id": "gow3",
@@ -20,6 +20,7 @@
       "markers": ["run.py", "scripts/prepare.py"],
       "keep_on_update": ["user/", "out/", "mods/", "spartanport.ini", "settings.json", "game_icon.ico", "mods.json", "mods_presets.json", "patches.json", "last_run.log", "gow3.ini"],
       "shader_cache": ["{install}\\user\\cache"],
+      "logs": ["{install}\\user\\last_run.log", "{install}\\last_run.log", "{install}\\log.txt"],
       "requirements": "Windows 10 (1903 ou mais novo) ou 11, 64-bit, processador com AVX e placa de vídeo com Vulkan 1.3 e driver atual.",
       "needs": "A pasta com o dump da sua própria cópia de PS4 (a que tem eboot.bin, sce_module e sce_sys).",
       "files_help": "O dump é feito no seu PS4 com o jogo instalado. Versões testadas pelo port: CUSA01623 e CUSA01715, versões 01.00 e 01.02.",

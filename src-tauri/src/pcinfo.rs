@@ -175,7 +175,7 @@ pub struct Finding {
 }
 
 const DRIVER_OLD_DAYS: u64 = 730;
-const VC_PAGE: &str = "https://learn.microsoft.com/pt-br/cpp/windows/latest-supported-vc-redist";
+pub const VC_PAGE: &str = "https://learn.microsoft.com/pt-br/cpp/windows/latest-supported-vc-redist";
 
 pub fn driver_page(vendor: &str) -> Option<&'static str> {
     match vendor {

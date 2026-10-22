@@ -1361,6 +1361,64 @@ function lostFilesBox(g) {
     </div>`;
 }
 
+const diagnoses = {};   // id -> null | diagnosis (diagnose.rs), shown until dismissed
+
+async function loadDiagnosis(id) {
+  diagnoses[id] = null;
+  try {
+    diagnoses[id] = await invoke('get_diagnosis', { id });
+  } catch { /* nothing to show */ }
+  if (diagnoses[id] && openId === id) render();
+}
+
+listen('crash', (e) => {
+  const d = e.payload;
+  diagnoses[d.id] = d;
+  delete shaderInfo[d.id];
+  const g = games.find((x) => x.id === d.id);
+  toast(`${g ? g.title : d.id} fechou com erro. A página do jogo diz o que tentar.`, true);
+  if (openId === d.id) render();
+});
+
+function crashAction(a) {
+  const extra = a.value ? (a.act === 'link' ? ` data-url="${esc(a.value)}"` : ` data-v="${esc(a.value)}"`) : '';
+  return ` <button class="link" data-act="${a.act}"${extra}>${esc(a.label)}</button>`;
+}
+
+function crashBox(g) {
+  if (!g.in_library && g.kind !== 'community' && g.kind !== 'pc_game') return '';
+  if (diagnoses[g.id] === undefined) {
+    setTimeout(() => loadDiagnosis(g.id), 0);
+    return '';
+  }
+  const d = diagnoses[g.id];
+  if (!d || d === 'loading') {
+    if (d === 'loading') return '<p class="muted">Procurando o erro nos registros do Windows…</p>';
+    return ['not_installed', 'installing'].includes(g.status) ? ''
+      : '<p class="muted">O jogo fechou sozinho? <button class="link" data-act="crash-scan">Procurar o erro</button></p>';
+  }
+  const bad = d.findings.some((f) => f.level === 'bad');
+  const when = new Date(d.at * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  const items = d.findings.map((f) =>
+    `<li class="${f.level === 'bad' ? 'bad-text' : ''}">${esc(f.text)}${f.action ? crashAction(f.action) : ''}</li>`).join('');
+  return `
+    <div class="box ${bad ? 'bad' : 'warn'}">
+      <h3>${d.code || (d.seconds !== null && d.seconds !== undefined) ? 'O jogo fechou com erro' : 'Procura de erros'}</h3>
+      <p class="muted">${esc(when)}${d.code ? ` · código ${esc(d.code)}` : ''}${d.module ? ` em ${esc(d.module)}` : ''}</p>
+      <ul>${items}</ul>
+      <details>
+        <summary>Relatório para pedir ajuda</summary>
+        <p class="muted">Copie e cole numa issue no GitHub do port. O nome da sua pasta de usuário é escondido; confira o texto antes de enviar.</p>
+        <pre class="crash-report">${esc(d.report)}</pre>
+      </details>
+      <div class="row">
+        <button data-act="crash-copy">Copiar relatório</button>
+        <button class="ghost" data-act="project">Abrir o GitHub do port</button>
+        <button class="ghost" data-act="crash-dismiss">Dispensar</button>
+      </div>
+    </div>`;
+}
+
 const shaderInfo = {};   // id -> 'loading' | null | {bytes, files, first_time, driver_changed, backup}
 
 async function loadShaders(id) {
@@ -1721,6 +1779,7 @@ function renderPortDetail(g) {
     }
     main += skippedNote(g);
     main += playRow(g, 'o port');
+    main += crashBox(g);
     main += pcCheckBox(g);
     main += filesBox(g);
     main += gfxBox(g);
@@ -2328,6 +2387,33 @@ async function act(action, g, el) {
     case 'win-security':
       await call('open_windows_security');
       break;
+    case 'crash-scan':
+      diagnoses[g.id] = 'loading';
+      render();
+      try {
+        diagnoses[g.id] = await call('diagnose_now', { id: g.id });
+      } catch {
+        diagnoses[g.id] = null;
+      }
+      render();
+      break;
+    case 'crash-copy':
+      try {
+        await navigator.clipboard.writeText(diagnoses[g.id].report);
+        toast('Relatório copiado.');
+      } catch {
+        toast('Não consegui copiar.', true);
+      }
+      break;
+    case 'crash-dismiss':
+      await call('dismiss_diagnosis', { id: g.id });
+      diagnoses[g.id] = null;
+      render();
+      break;
+    case 'open-dumps':
+    case 'open-logs':
+      await call('open_crash_folder', { id: g.id, what: action === 'open-dumps' ? 'dumps' : 'logs' });
+      break;
     case 'pc-copy':
       try {
         await navigator.clipboard.writeText(pcInfo.report);
@@ -2367,7 +2453,7 @@ async function act(action, g, el) {
       break;
     case 'gfx-api':
       await call('set_graphics_api', { id: g.id, api: el.dataset.v });
-      gfx[g.id].api = el.dataset.v;
+      if (gfx[g.id]) gfx[g.id].api = el.dataset.v;
       toast(`API gráfica: ${el.textContent}. Vale na próxima vez que o jogo abrir.`);
       render();
       break;
@@ -2779,6 +2865,7 @@ function renderCommunityDetail(g) {
         ${update}
         ${lostFilesBox(g)}
         ${playRow(g, 'o port')}
+        ${crashBox(g)}
         ${pcCheckBox(g)}
         ${exeBox}
         ${gfxBox(g)}

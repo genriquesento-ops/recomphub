@@ -106,6 +106,10 @@ pub struct GameDef {
     /// uninstall like the saves, and "Limpar cache de shaders" on the game page.
     #[serde(default)]
     pub shader_cache: Vec<String>,
+    /// The port's own log files ({install} allowed); the end of each goes into the problem
+    /// report when the game closes with an error (diagnose.rs).
+    #[serde(default)]
+    pub logs: Vec<String>,
     /// Files whose presence identifies an installed copy of this port.
     pub markers: Vec<String>,
     /// Files kept from the old copy when updating (paths or folder prefixes, with '/').
@@ -227,6 +231,9 @@ pub fn validate(g: &GameDef) -> Result<(), String> {
     }
     if !g.shader_cache.iter().all(|s| expand(s, Some(Path::new("C:\\x"))).is_some()) {
         return err("pasta de shaders inválida");
+    }
+    if !g.logs.iter().all(|s| expand(s, Some(Path::new("C:\\x"))).is_some()) {
+        return err("log inválido");
     }
     if !g.saves.iter().all(|s| expand(s, Some(Path::new("C:\\x"))).is_some()) {
         return err("pasta de saves inválida");

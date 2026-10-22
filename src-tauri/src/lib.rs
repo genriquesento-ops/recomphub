@@ -4,6 +4,7 @@ mod catalog;
 mod catalog_sync;
 mod community;
 mod community_art;
+mod diagnose;
 mod covers;
 mod files;
 mod fps;
@@ -3033,7 +3034,117 @@ pub(crate) fn program_of(id: &str, entry: &library::Entry) -> Option<String> {
 fn stop_game(app: AppHandle, id: String) -> Result<(), String> {
     let entry = app.state::<AppState>().library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
     let name = program_of(&id, &entry).and_then(|x| play::exe_name(&x));
+    // Marked first: the watcher may see the game end before stop returns.
+    app.state::<AppState>().sessions.lock().unwrap().mark_stopped(&id);
     play::stop(Path::new(&entry.install_dir), name.as_deref()).map(|_| ())
+}
+
+// ---- "O jogo fechou com erro" (diagnose.rs) ----
+
+/// Looks at how a session ended (since `since`, Unix time). When there is a sign of trouble (a
+/// crash code, a Windows error record, a crash dump or a session too short to be play) the
+/// diagnosis is kept for the game page and announced; `asked` ("Procurar o erro") always
+/// returns one and announces nothing.
+pub(crate) fn check_crash(app: &AppHandle, id: &str, since: u64, seconds: Option<u64>, exit_code: Option<u32>, asked: bool) -> Option<diagnose::Diagnosis> {
+    let state = app.state::<AppState>();
+    let entry = state.library.lock().unwrap().games.get(id).cloned()?;
+    let dir = PathBuf::from(&entry.install_dir);
+    let game = catalog::get(id);
+    let names = diagnose::exe_names(&dir);
+    let events = diagnose::events_since(since.saturating_sub(5));
+    let event = diagnose::newest_for(&events, &dir, &names).cloned();
+    // Windows' record names the module too; the exit code covers what never reaches it.
+    let code = event.as_ref().map(|e| e.code).or(exit_code.filter(|c| diagnose::is_crash_code(*c)));
+    let module = event.as_ref().map(|e| e.module.clone()).filter(|m| !m.is_empty());
+    let dumps = diagnose::dumps_dir().map(|d| diagnose::dumps_since(&d, &names, since)).unwrap_or_default();
+    let short = seconds.is_some_and(|s| s < diagnose::SHORT_SESSION_SECS);
+    if !asked && code.is_none() && dumps.is_empty() && !short {
+        return None;
+    }
+
+    let info = pcinfo::get(false);
+    let logs: Vec<PathBuf> = game
+        .map(|g| g.logs.iter().filter_map(|t| catalog::expand(t, Some(dir.as_path()))).filter(|p| p.is_file()).collect())
+        .unwrap_or_default();
+    let n64 = game.filter(|g| matches!(g.files, catalog::Verifier::N64Rom { .. }));
+    let current = pcinfo::driver_signature(&info);
+    let ctx = diagnose::Context {
+        code,
+        module: module.clone(),
+        seconds,
+        cpu_missing: game
+            .map(|g| g.cpu_features.iter().filter(|f| !info.cpu_features.contains(&f.as_str())).cloned().collect())
+            .unwrap_or_default(),
+        vc_runtime: info.vc_runtime,
+        has_shader_cache: game.is_some_and(|g| !g.shader_cache.is_empty()),
+        driver_changed: !current.is_empty() && entry.shader_driver.as_ref().is_some_and(|r| *r != current),
+        n64_api: n64.and_then(|g| files::n64_graphics_api(g, &dir)),
+        gpus: info.gpus.iter().filter(|g| !g.name.to_lowercase().contains("basic")).count(),
+        mods_on: game
+            .filter(|g| g.mods.is_some())
+            .and_then(|g| files::n64_data_dir(g, &dir))
+            .map(|d| mods::enabled_in(&d.join("mods.json")).len())
+            .unwrap_or(0),
+        dumps: dumps.len(),
+        has_logs: !logs.is_empty(),
+        driver_pages: info.gpus.iter().filter_map(|g| pcinfo::driver_page(g.vendor).map(|u| (g.vendor, u))).collect(),
+    };
+    let mut d = diagnose::Diagnosis {
+        id: id.to_string(),
+        at: event.as_ref().map(|e| e.at).unwrap_or_else(library::now),
+        seconds,
+        code: code.map(diagnose::code_text),
+        module,
+        findings: diagnose::findings(&ctx),
+        dumps: dumps.iter().map(|p| p.display().to_string()).collect(),
+        logs: logs.iter().map(|p| p.display().to_string()).collect(),
+        report: String::new(),
+    };
+    let tails: Vec<(String, String)> =
+        logs.iter().filter_map(|p| Some((p.file_name()?.to_string_lossy().to_string(), diagnose::log_tail(p)?))).collect();
+    let title = match game {
+        Some(g) => format!("{} ({})", g.title, g.repo),
+        None => format!("{}{}", entry.title.clone().unwrap_or_else(|| id.to_string()), entry.repo.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()),
+    };
+    let version = entry.version.clone().unwrap_or_else(|| "não identificada".into());
+    let text = diagnose::report(&title, &version, &d, &pcinfo::report(&info), &tails);
+    d.report = diagnose::anonymize(&text, std::env::var("USERPROFILE").ok().as_deref(), std::env::var("USERNAME").ok().as_deref());
+    diagnose::remember(d.clone());
+    if !asked {
+        let _ = app.emit("crash", &d);
+    }
+    Some(d)
+}
+
+#[tauri::command]
+fn get_diagnosis(id: String) -> Option<diagnose::Diagnosis> {
+    diagnose::last(&id)
+}
+
+/// "Procurar o erro": the newest error of the game in the last 7 days, and the report.
+#[tauri::command]
+async fn diagnose_now(app: AppHandle, id: String) -> Result<diagnose::Diagnosis, String> {
+    let since = library::now().saturating_sub(7 * 86_400);
+    tauri::async_runtime::spawn_blocking(move || check_crash(&app, &id, since, None, None, true))
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Jogo fora da biblioteca.".to_string())
+}
+
+#[tauri::command]
+fn dismiss_diagnosis(id: String) {
+    diagnose::forget(&id);
+}
+
+/// "Abrir pasta do despejo" / "Abrir pasta do log".
+#[tauri::command]
+fn open_crash_folder(app: AppHandle, id: String, what: String) -> Result<(), String> {
+    let d = diagnose::last(&id).ok_or("Nada para abrir.")?;
+    let path = match what.as_str() {
+        "dumps" => diagnose::dumps_dir().ok_or("Pasta não encontrada.")?,
+        _ => d.logs.first().and_then(|l| Path::new(l).parent().map(Path::to_path_buf)).ok_or("Este port não tem log conhecido.")?,
+    };
+    app.opener().open_path(path.display().to_string(), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// "Abrir como administrador" on the game page.
@@ -3309,6 +3420,10 @@ pub fn run() {
             set_graphics_api,
             get_shader_cache,
             get_community_art,
+            get_diagnosis,
+            diagnose_now,
+            dismiss_diagnosis,
+            open_crash_folder,
             clear_shader_cache,
             undo_shader_clear,
             open_windows_security,
