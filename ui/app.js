@@ -286,14 +286,17 @@ function skippedNote(g) {
 
 function shortcutsRow(g) {
   return `
-    <div class="row">
-      <button class="ghost" data-act="shortcut-desktop">Atalho na área de trabalho</button>
-      <button class="ghost" data-act="shortcut-start">Atalho no menu Iniciar</button>
-      <button class="ghost" data-act="steam-add">Adicionar à Steam</button>
-      ${g.kind === 'port' ? '<button class="ghost" data-act="saves">Abrir pasta de saves</button>' : ''}
-    </div>
-    <p class="muted">Os atalhos abrem o jogo pelo RecompHUB, então o tempo de jogo continua sendo contado. Na Steam o jogo
-      aparece como "jogo não Steam", funciona no Big Picture e usa a configuração de controle da Steam. Feche a Steam antes.</p>`;
+    <div class="box">
+      <h3>Atalhos</h3>
+      <div class="row">
+        <button data-act="shortcut-desktop">Na área de trabalho</button>
+        <button data-act="shortcut-start">No menu Iniciar</button>
+        <button data-act="steam-add">Na Steam</button>
+        ${g.kind === 'port' ? '<button class="ghost" data-act="saves">Abrir pasta de saves</button>' : ''}
+      </div>
+      <p class="muted">Os atalhos abrem o jogo pelo RecompHUB, então o tempo de jogo continua contando. Na Steam ele aparece
+        como "jogo não Steam" e funciona no Big Picture; feche a Steam antes.</p>
+    </div>`;
 }
 
 function renderPcDetail(g) {
@@ -314,26 +317,28 @@ function renderPcDetail(g) {
           <div><div class="k">Tempo de jogo</div><div class="v">${playTime(g.total_seconds)}</div></div>
           <div><div class="k">Última sessão</div><div class="v">${lastPlayed(g.last_played)}</div></div>
         </div>
-        ${missing}
         ${playRow(g, 'o jogo')}
-        ${gfxBox(g)}
-        ${shortcutsRow(g)}
-        <div class="box">
-          <h3>Nome</h3>
-          <div class="tags-edit">
-            <input type="text" id="title-input" value="${esc(g.title)}">
-            <button data-act="rename">Renomear</button>
-          </div>
-        </div>
-        ${manageRow(g)}
-        ${tagsBox(g)}
-        ${launchBox(g)}
-        <div class="row">
-          <button class="ghost" data-act="folder">Abrir pasta do jogo</button>
-          <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
-          <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
-        </div>
-        <p class="muted">Remover da biblioteca não apaga nenhum arquivo. ${esc(g.install_dir || '')}</p>
+        ${missing}
+        ${crashBox(g)}
+        ${pageTabs(g.id, [
+          ['geral', 'Visão geral', ''],
+          ['saves', 'Saves', ''],
+          ['conquistas', 'Conquistas', ''],
+          ['ajustes', 'Ajustes', `
+            <div class="box">
+              <h3>Nome</h3>
+              <div class="tags-edit">
+                <input type="text" id="title-input" value="${esc(g.title)}">
+                <button data-act="rename">Renomear</button>
+              </div>
+            </div>
+            ${gfxBox(g)}
+            ${shortcutsRow(g)}
+            ${launchBox(g)}
+            ${tagsBox(g)}
+            ${crashScan(g)}
+            ${manageRow(g)}`],
+        ])}
       </div>
     </div>`;
 }
@@ -512,7 +517,7 @@ function decorateProgress(g) {
       if (openId === g.id) render();
     }, 0);
   }
-  const right = document.querySelector('#detail .detail > div:nth-child(2)');
+  const right = document.querySelector('#pane-geral');
   if (!right) return;
   right.insertAdjacentHTML('beforeend', progressBoxHtml(g));
   const select = document.getElementById('completion');
@@ -614,8 +619,8 @@ function decorateBackups(g) {
       if (openId === g.id) render();
     }, 0);
   }
-  const right = document.querySelector('#detail .detail > div:nth-child(2)');
-  if (right) right.insertAdjacentHTML('beforeend', backupsBoxHtml(g));
+  const pane = document.querySelector('#pane-saves');
+  if (pane) pane.insertAdjacentHTML('beforeend', backupsBoxHtml(g));
 }
 
 async function reloadBackups(id) {
@@ -843,10 +848,8 @@ function decorateAchievements(g) {
       if (openId === g.id) render();
     }, 0);
   }
-  const right = document.querySelector('#detail .detail > div:nth-child(2)');
-  const progress = right && right.querySelector('.progress-box');
-  if (progress) progress.insertAdjacentHTML('beforebegin', achievementsBoxHtml(g));
-  else if (right) right.insertAdjacentHTML('beforeend', achievementsBoxHtml(g));
+  const pane = document.querySelector('#pane-conquistas');
+  if (pane) pane.insertAdjacentHTML('beforeend', achievementsBoxHtml(g));
 }
 
 function achievementSettingsBox() {
@@ -1217,10 +1220,8 @@ function decorateMeta(g) {
   if (!detail) return;
   const m = metaCache[g.id];
   if (m && m.banner) detail.insertAdjacentHTML('beforebegin', `<img class="hero" src="${m.banner}" alt="">`);
-  const right = detail.children[1];
-  const stats = right && right.querySelector('.stats');
-  if (stats) stats.insertAdjacentHTML('afterend', aboutBox(g));
-  else if (right) right.insertAdjacentHTML('beforeend', aboutBox(g));
+  const geral = document.querySelector('#pane-geral');
+  if (geral) geral.insertAdjacentHTML('afterbegin', aboutBox(g));
 }
 
 function coverColumn(g) {
@@ -1321,7 +1322,8 @@ function findingLink(f) {
   return f.link ? ` <button class="link" data-act="link" data-url="${esc(f.link[1])}">${esc(f.link[0])}</button>` : '';
 }
 
-function pcCheckBox(g) {
+// `which`: 'bad' for the top of the page (only when the port cannot run here), 'warn' for Ajustes.
+function pcCheckBox(g, which = 'bad') {
   if (g.kind === 'pc_game') return '';
   const list = pcChecks[g.id];
   if (list === undefined) {
@@ -1329,15 +1331,16 @@ function pcCheckBox(g) {
     return '';
   }
   if (!Array.isArray(list) || !list.length) return '';
+  const bad = list.some((x) => x.level === 'bad');
+  if ((which === 'bad') !== bad) return '';
   if (list.every((x) => x.level === 'ok')) {
     return `<p class="muted pc-ok">Seu PC: ${esc(list[0].text)}</p>`;
   }
-  const bad = list.some((x) => x.level === 'bad');
   const items = list.filter((x) => x.level !== 'ok')
     .map((x) => `<li class="${x.level === 'bad' ? 'bad-text' : ''}">${esc(x.text)}${findingLink(x)}</li>`).join('');
   return `
     <div class="box ${bad ? 'bad' : 'warn'}">
-      <h3>${bad ? 'Este port não deve rodar no seu PC' : 'Pode dar problema no seu PC'}</h3>
+      <h3>${bad ? 'Este port não deve rodar no seu PC' : 'Seu PC: pode dar problema'}</h3>
       <ul>${items}</ul>
       <p class="muted">O RecompHUB conferiu processador, placa de vídeo, driver, Windows e o Visual C++.
         Detalhes em Configurações > Seu PC.</p>
@@ -1392,11 +1395,8 @@ function crashBox(g) {
     return '';
   }
   const d = diagnoses[g.id];
-  if (!d || d === 'loading') {
-    if (d === 'loading') return '<p class="muted">Procurando o erro nos registros do Windows…</p>';
-    return ['not_installed', 'installing'].includes(g.status) ? ''
-      : '<p class="muted">O jogo fechou sozinho? <button class="link" data-act="crash-scan">Procurar o erro</button></p>';
-  }
+  if (!d) return '';
+  if (d === 'loading') return '<p class="muted">Procurando o erro nos registros do Windows…</p>';
   const bad = d.findings.some((f) => f.level === 'bad');
   const when = new Date(d.at * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
   const items = d.findings.map((f) =>
@@ -1576,11 +1576,50 @@ function launchBox(g) {
 }
 
 function manageRow(g) {
+  return manageBox(g, 'Abrir pasta do jogo', 'Remover da biblioteca não apaga nenhum arquivo.');
+}
+
+// "Gerenciar", at the end of Ajustes: folder, favorite, hide, and the two ways out.
+function manageBox(g, folderLabel, note) {
   if (!g.in_library) return '';
   return `
-    <div class="row">
-      <button class="ghost" data-act="favorite">${g.favorite ? '★ Tirar dos favoritos' : '☆ Favoritar'}</button>
-      <button class="ghost" data-act="hide">${g.hidden ? 'Mostrar na biblioteca' : 'Ocultar da biblioteca'}</button>
+    <div class="box">
+      <h3>Gerenciar</h3>
+      <div class="row">
+        <button data-act="folder">${folderLabel}</button>
+        <button class="ghost" data-act="favorite">${g.favorite ? '★ Tirar dos favoritos' : '☆ Favoritar'}</button>
+        <button class="ghost" data-act="hide">${g.hidden ? 'Mostrar na biblioteca' : 'Ocultar da biblioteca'}</button>
+        <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
+      </div>
+      <div class="row">
+        ${g.installed_by_hub ? '<button class="danger" data-act="uninstall">Desinstalar</button>' : ''}
+        <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
+      </div>
+      <p class="muted">${note}</p>
+      ${g.install_dir ? `<p class="muted path">${esc(g.install_dir)}</p>` : ''}
+    </div>`;
+}
+
+// ---- The game page: what matters on top (Jogar and anything wrong), the rest in tabs ----
+
+const pageTab = {};   // page key (game id, '__settings') -> open tab
+
+function pageTabs(key, panes) {
+  const cur = panes.some((p) => p[0] === pageTab[key]) ? pageTab[key] : panes[0][0];
+  return `
+    <nav class="tabs page-tabs">${panes.map(([k, label]) =>
+      `<button class="${k === cur ? 'on' : ''}" data-act="page-tab" data-k="${esc(key)}" data-v="${k}">${label}</button>`).join('')}</nav>
+    ${panes.map(([k, , html]) => `<div class="pane" id="pane-${k}" ${k === cur ? '' : 'hidden'}>${html}</div>`).join('')}`;
+}
+
+function crashScan(g) {
+  if (['not_installed', 'installing'].includes(g.status)) return '';
+  return `
+    <div class="box">
+      <h3>O jogo fecha sozinho?</h3>
+      <p class="muted">O RecompHUB procura o erro nos registros do Windows dos últimos 7 dias, explica o que encontrou e monta
+        um relatório para pedir ajuda no GitHub do port.</p>
+      <div class="row"><button data-act="crash-scan">Procurar o erro</button></div>
     </div>`;
 }
 
@@ -1599,9 +1638,28 @@ function keysBox() {
         Cada jogo é buscado uma vez e fica guardado no seu PC.</p>
       <p><b>SteamGridDB</b> ${saved(settings.has_steamgriddb)}
         <button class="link" data-act="link" data-url="${esc(settings.sgdb_key_page)}">pegar minha chave</button></p>
+      <details class="key-help">
+        <summary>Como pegar a chave da SteamGridDB (1 minuto)</summary>
+        <ol>
+          <li>Clique em "pegar minha chave": abre a página de API da SteamGridDB.</li>
+          <li>Entre com a sua conta Steam (botão Login no alto da página).</li>
+          <li>Clique em "Generate API Key" e copie a chave que aparece.</li>
+          <li>Cole no campo abaixo e clique em "Salvar e testar".</li>
+        </ol>
+      </details>
       <input type="password" id="key-sgdb" class="wide" autocomplete="off" placeholder="${settings.has_steamgriddb ? 'Deixe vazio para manter a chave guardada' : 'Chave de API da SteamGridDB'}">
       <p><b>IGDB</b> ${saved(settings.has_igdb)}
-        <button class="link" data-act="link" data-url="${esc(settings.igdb_key_page)}">como criar (aplicativo na Twitch)</button></p>
+        <button class="link" data-act="link" data-url="https://dev.twitch.tv/console/apps">abrir o console da Twitch</button></p>
+      <details class="key-help">
+        <summary>Como pegar a chave da IGDB (5 minutos)</summary>
+        <ol>
+          <li>A IGDB é da Twitch. Entre no console da Twitch com a sua conta; ela precisa ter a verificação em duas etapas ligada.</li>
+          <li>Clique em "Register Your Application". Nome: qualquer um (ex.: RecompHUB do Fulano). OAuth Redirect URL:
+            <code>http://localhost</code>. Categoria: Application Integration. Tipo: Confidential.</li>
+          <li>Depois de criar, clique em "Manage": copie o Client ID e clique em "New Secret" para gerar o Client Secret.</li>
+          <li>Cole os dois abaixo e clique em "Salvar e testar".</li>
+        </ol>
+      </details>
       <input type="text" id="key-igdb-id" class="wide" autocomplete="off" placeholder="${settings.has_igdb ? 'Client ID (vazio mantém o guardado)' : 'Client ID'}">
       <input type="password" id="key-igdb-secret" class="wide" autocomplete="off" placeholder="${settings.has_igdb ? 'Client Secret (vazio mantém o guardado)' : 'Client Secret'}">
       <div class="row">
@@ -1671,21 +1729,27 @@ function renderSettings() {
     <button class="ghost back" data-act="back">← Biblioteca</button>
     <div class="covers-page">
       <h2>Configurações</h2>
-      <div class="box">
-        <label class="check"><input type="checkbox" id="set-tray" ${settings.close_to_tray ? 'checked' : ''}>
-          Fechar para a bandeja: ao fechar a janela, o RecompHUB continua perto do relógio e segue contando o tempo de jogo.
-          Para sair de vez, use "Sair" no ícone da bandeja.</label>
-        <label class="check"><input type="checkbox" id="set-hidden" ${settings.show_hidden ? 'checked' : ''}>
-          Mostrar jogos ocultos na biblioteca.</label>
-        <div class="row"><button data-act="settings-save">Salvar</button></div>
-      </div>
-      ${pcInfoBox()}
-      ${fpsBox()}
-      ${achievementSettingsBox()}
-      ${backupSettingsBox()}
-      ${keysBox()}
-      ${githubTokenBox()}
-      <p class="muted">RecompHUB versão ${esc(settings.version)}.</p>
+      ${pageTabs('__settings', [
+        ['geral', 'Geral', `
+          <div class="box">
+            <label class="check"><input type="checkbox" id="set-tray" ${settings.close_to_tray ? 'checked' : ''}>
+              Fechar para a bandeja: ao fechar a janela, o RecompHUB continua perto do relógio e segue contando o tempo de jogo.
+              Para sair de vez, use "Sair" no ícone da bandeja.</label>
+            <label class="check"><input type="checkbox" id="set-hidden" ${settings.show_hidden ? 'checked' : ''}>
+              Mostrar jogos ocultos na biblioteca.</label>
+            <div class="row"><button data-act="settings-save">Salvar</button></div>
+          </div>
+          <div class="box">
+            <h3>Tutorial</h3>
+            <p class="muted">Um passo a passo curto: como instalar um port, onde fica cada coisa e como ligar as capas.</p>
+            <div class="row"><button data-act="tour">Ver o tutorial</button></div>
+          </div>
+          <p class="muted">RecompHUB versão ${esc(settings.version)}.</p>`],
+        ['pc', 'Seu PC', pcInfoBox()],
+        ['jogo', 'Durante o jogo', fpsBox() + achievementSettingsBox()],
+        ['saves', 'Saves', backupSettingsBox()],
+        ['contas', 'Capas e GitHub', keysBox() + githubTokenBox()],
+      ])}
     </div>`;
   document.querySelectorAll('#detail [data-act]').forEach((el) =>
     el.addEventListener('click', () => act(el.dataset.act, null, el)));
@@ -1755,7 +1819,7 @@ function renderPortDetail(g) {
   if (g.status === 'installing') {
     main = progressBox(g);
   } else if (g.status === 'not_installed') {
-    main = lostFilesBox(g) + pcCheckBox(g) + `
+    main = lostFilesBox(g) + pcCheckBox(g, 'bad') + `
       <div class="box">
         <h3>Instalar</h3>
         <p>O RecompHUB baixa a versão mais recente do port na página oficial do projeto${latest ? ` (${esc(latest)})` : ''} e depois pede os arquivos da sua cópia.</p>
@@ -1763,11 +1827,15 @@ function renderPortDetail(g) {
         ${g.pending_saves ? '<p><b>Seus saves da instalação anterior estão guardados</b> e voltam para o lugar quando você instalar.</p>' : ''}
         <div class="row">
           <button class="primary" data-act="install">Instalar</button>
-          <button data-act="add">Já tenho instalado: escolher a pasta</button>
+          <button class="ghost" data-act="add">Já tenho instalado: escolher a pasta</button>
         </div>
       </div>
+      ${pcCheckBox(g, 'warn')}
       ${guideBox(g)}`;
   } else {
+    const picked = filesResult[g.id];
+    const filesOk = g.files && g.files.ok && !(picked && !picked.ok);
+    main += playRow(g, 'o port');
     if (g.update_available) {
       main += `
         <div class="box warn">
@@ -1778,18 +1846,20 @@ function renderPortDetail(g) {
         </div>`;
     }
     main += skippedNote(g);
-    main += playRow(g, 'o port');
     main += crashBox(g);
-    main += pcCheckBox(g);
-    main += filesBox(g);
-    main += gfxBox(g);
-    main += shaderBox(g);
-    main += modsBox(g);
-    main += shortcutsRow(g);
-    main += versionBox(g);
-    main += manageRow(g);
-    main += tagsBox(g);
-    main += launchBox(g);
+    main += pcCheckBox(g, 'bad');
+    if (!filesOk) main += filesBox(g);
+    main += pageTabs(g.id, [
+      ['geral', 'Visão geral', ''],
+      ...(g.has_mods ? [['mods', 'Mods', modsBox(g)]] : []),
+      ['saves', 'Saves', ''],
+      ['conquistas', 'Conquistas', ''],
+      ['ajustes', 'Ajustes', pcCheckBox(g, 'warn') + (filesOk ? filesBox(g) : '') + gfxBox(g) + shaderBox(g) + versionBox(g)
+        + shortcutsRow(g) + launchBox(g) + tagsBox(g) + crashScan(g)
+        + manageBox(g, 'Abrir pasta do port', g.installed_by_hub
+          ? 'Desinstalar apaga a pasta do port, mas guarda seus saves e configurações para a próxima instalação. Remover da biblioteca não apaga nada.'
+          : 'Este port foi adicionado de uma pasta sua: o RecompHUB nunca apaga esses arquivos. Remover da biblioteca não apaga nada.')],
+    ]);
   }
 
   $('#detail').innerHTML = `
@@ -1807,17 +1877,6 @@ function renderPortDetail(g) {
           <div><div class="k">Versão do port</div><div class="v">${esc(version || '—')}</div></div>
         </div>
         ${main}
-        ${g.in_library ? `
-          <div class="row">
-            <button class="ghost" data-act="folder">Abrir pasta do port</button>
-            <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
-            ${g.installed_by_hub ? '<button class="ghost danger" data-act="uninstall">Desinstalar</button>' : ''}
-            <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
-          </div>
-          <p class="muted">${g.installed_by_hub
-            ? 'Desinstalar apaga a pasta do port, mas guarda seus saves e configurações para a próxima instalação. Remover da biblioteca não apaga nada.'
-            : 'Este port foi adicionado de uma pasta sua: o RecompHUB nunca apaga esses arquivos. Remover da biblioteca não apaga nada.'}
-            ${esc(g.install_dir || '')}</p>` : ''}
       </div>
     </div>`;
 }
@@ -2387,6 +2446,13 @@ async function act(action, g, el) {
     case 'win-security':
       await call('open_windows_security');
       break;
+    case 'page-tab':
+      pageTab[el.dataset.k] = el.dataset.v;
+      render();
+      break;
+    case 'tour':
+      openTour();
+      break;
     case 'crash-scan':
       diagnoses[g.id] = 'loading';
       render();
@@ -2862,26 +2928,26 @@ function renderCommunityDetail(g) {
           <div><div class="k">Versão</div><div class="v">${esc(g.version || '—')}</div></div>
         </div>
         ${g.status === 'installing' ? progressBox(g) : ''}
+        ${playRow(g, 'o port')}
         ${update}
         ${lostFilesBox(g)}
-        ${playRow(g, 'o port')}
         ${crashBox(g)}
-        ${pcCheckBox(g)}
+        ${pcCheckBox(g, 'bad')}
         ${exeBox}
-        ${gfxBox(g)}
-        <p class="muted">Port não verificado pelo RecompHUB: os arquivos do jogo seguem o README do projeto.</p>
-        ${shortcutsRow(g)}
-        ${g.status !== 'needs_exe' && !choices ? '<div class="row"><button class="ghost" data-act="exe-list">Trocar o programa do botão Jogar</button></div>' : ''}
-        ${manageRow(g)}
-        ${tagsBox(g)}
-        ${launchBox(g)}
-        <div class="row">
-          <button class="ghost" data-act="folder">Abrir pasta do port</button>
-          <button class="ghost" data-act="reset-time">Zerar tempo de jogo</button>
-          ${g.installed_by_hub ? '<button class="ghost danger" data-act="uninstall">Desinstalar</button>' : ''}
-          <button class="ghost danger" data-act="remove">Remover da biblioteca</button>
-        </div>
-        <p class="muted">Desinstalar apaga a pasta do port, mas guarda saves, save, savedata, user e config para a próxima instalação. ${esc(g.install_dir || '')}</p>
+        ${pageTabs(g.id, [
+          ['geral', 'Visão geral', '<p class="muted">Port não verificado pelo RecompHUB: os arquivos do jogo seguem o README do projeto.</p>'],
+          ['saves', 'Saves', ''],
+          ['conquistas', 'Conquistas', ''],
+          ['ajustes', 'Ajustes', `
+            ${pcCheckBox(g, 'warn')}
+            ${g.status !== 'needs_exe' && !choices ? '<div class="box"><h3>Programa do botão Jogar</h3><div class="row"><button data-act="exe-list">Trocar o programa</button></div></div>' : ''}
+            ${gfxBox(g)}
+            ${shortcutsRow(g)}
+            ${launchBox(g)}
+            ${tagsBox(g)}
+            ${crashScan(g)}
+            ${manageBox(g, 'Abrir pasta do port', 'Desinstalar apaga a pasta do port, mas guarda saves, save, savedata, user e config para a próxima instalação.')}`],
+        ])}
       </div>
     </div>`;
 }
@@ -3015,6 +3081,158 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('#btn-tv').addEventListener('click', tvOpen);
+
+// "Mais" and "Adicionar": one list open at a time; any click closes it.
+document.querySelectorAll('.menu > [data-menu]').forEach((b) => b.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const list = b.nextElementSibling;
+  const opening = list.hidden;
+  document.querySelectorAll('.menu-list').forEach((l) => (l.hidden = true));
+  list.hidden = !opening;
+}));
+document.addEventListener('click', () => document.querySelectorAll('.menu-list').forEach((l) => (l.hidden = true)));
+$('#btn-tour').addEventListener('click', () => openTour());
+$('#btn-discover').addEventListener('click', () => {
+  openId = null;
+  tab = 'discover';
+  render();
+});
+
+// ---- Tutorial: shown once, the first time; again from Mais > Tutorial ----
+
+const TOUR_SEEN = 'recomphub-tutorial-1';
+let tourStep = 0;
+let tourResult = null;   // "Salvar e testar" of the SteamGridDB key inside the tutorial
+
+function tourSteps() {
+  const sgdb = settings.has_steamgriddb;
+  return [
+    {
+      title: 'Bem-vindo ao RecompHUB',
+      html: `<p>Aqui ficam os seus <b>ports</b>: jogos de console refeitos para rodar direto no PC, sem emulador.</p>
+        <p>O RecompHUB instala o port pela página oficial do projeto, confere os arquivos do seu jogo, abre o jogo, conta o
+          tempo jogado e guarda backup dos saves.</p>
+        <p class="muted">Ele nunca baixa jogos: os arquivos vêm da sua própria cópia.</p>`,
+    },
+    {
+      title: 'Instalar um jogo',
+      html: `<ol>
+          <li>Abra a aba <b>Descobrir</b> e escolha um jogo.</li>
+          <li>Clique em <b>Instalar</b>. O port vem do GitHub do projeto.</li>
+          <li>Arraste o arquivo da sua cópia (a ROM ou a pasta do dump) para a página do jogo. O RecompHUB confere se é o certo.</li>
+          <li>Clique em <b>Jogar</b>.</li>
+        </ol>
+        <p class="muted">Se o port já está no seu PC, use Adicionar > Port que já está no PC.</p>`,
+    },
+    {
+      title: 'A página do jogo',
+      html: `<p><b>Jogar</b> fica sempre no alto. Logo abaixo aparecem só os avisos que importam agora, como versão nova ou
+          um erro ao abrir. O resto fica em abas:</p>
+        <ul>
+          <li><b>Visão geral</b>: descrição, tempo de jogo e anotações.</li>
+          <li><b>Saves</b>: backups automáticos, restaurar e travar.</li>
+          <li><b>Conquistas</b>: as do RecompHUB e as do RetroAchievements.</li>
+          <li><b>Ajustes</b>: vídeo, versão do port, atalhos e desinstalar.</li>
+        </ul>
+        <p class="muted">Se o jogo fechar com erro, o RecompHUB mostra o motivo provável e o que tentar.</p>`,
+    },
+    {
+      title: 'Comunidade',
+      html: `<p>A aba <b>Comunidade</b> mostra outros ports achados no GitHub, de vários consoles.</p>
+        <p>Eles <b>não</b> foram conferidos pelo RecompHUB: instale só de projetos em que você confia, e leia o README de cada
+          um para saber quais arquivos do jogo ele pede.</p>`,
+    },
+    {
+      title: 'Capas e fotos (opcional)',
+      html: `<p>Com uma chave grátis da <b>SteamGridDB</b>, a biblioteca ganha capas e banners de verdade.</p>
+        <ol>
+          <li><button class="link" data-tour-link="${esc(settings.sgdb_key_page || 'https://www.steamgriddb.com/profile/preferences/api')}">Abrir a página de API da SteamGridDB</button>.</li>
+          <li>Entre com a sua conta Steam (botão Login no alto).</li>
+          <li>Clique em "Generate API Key" e copie a chave.</li>
+          <li>Cole aqui:</li>
+        </ol>
+        <div class="tags-edit">
+          <input type="password" id="tour-sgdb" autocomplete="off" placeholder="${sgdb ? 'Chave já guardada' : 'Chave de API da SteamGridDB'}">
+          <button data-tour="sgdb">Salvar e testar</button>
+        </div>
+        ${tourResult ? `<ul>${tourResult.map((r) => `<li class="${r.ok ? 'ok-text' : 'bad-text'}">${esc(r.message)}</li>`).join('')}</ul>` : ''}
+        <p class="muted">A chave fica só neste PC. Descrição e ano dos jogos vêm da IGDB, que pede uma chave da Twitch: o passo a
+          passo está em Configurações > Capas e GitHub.</p>`,
+    },
+    {
+      title: 'Pronto',
+      html: `<p>Isso é o básico. Para rever este tutorial, use <b>Mais > Tutorial</b>.</p>
+        <p class="muted">Se o GitHub disser que você passou do limite de consultas (comum com muitos jogos), crie um token
+          grátis em Configurações > Capas e GitHub.</p>`,
+    },
+  ];
+}
+
+function renderTour() {
+  const steps = tourSteps();
+  const s = steps[tourStep];
+  const last = tourStep === steps.length - 1;
+  $('#tour').innerHTML = `
+    <div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title">
+      <p class="tour-count">${tourStep + 1} de ${steps.length}</p>
+      <h2 id="tour-title">${s.title}</h2>
+      <div class="tour-body">${s.html}</div>
+      <div class="row tour-nav">
+        ${tourStep ? '<button class="ghost" data-tour="back">Voltar</button>' : ''}
+        <span class="grow"></span>
+        ${last ? '' : '<button class="ghost" data-tour="close">Pular tutorial</button>'}
+        <button class="primary" data-tour="${last ? 'close' : 'next'}">${last ? 'Começar' : 'Próximo'}</button>
+      </div>
+    </div>`;
+  $('#tour').querySelectorAll('[data-tour]').forEach((el) => el.addEventListener('click', () => tourAct(el.dataset.tour, el)));
+  $('#tour').querySelectorAll('[data-tour-link]').forEach((el) =>
+    el.addEventListener('click', () => call('open_link', { url: el.dataset.tourLink })));
+  const focus = $('#tour').querySelector('[data-tour=next], [data-tour=close].primary');
+  if (focus) focus.focus();
+}
+
+async function tourAct(what, el) {
+  if (what === 'next') tourStep += 1;
+  else if (what === 'back') tourStep = Math.max(0, tourStep - 1);
+  else if (what === 'close') return closeTour();
+  else if (what === 'sgdb') {
+    const key = $('#tour-sgdb').value.trim();
+    if (!key) {
+      tourResult = [{ ok: false, message: 'Cole a chave no campo primeiro.' }];
+    } else {
+      el.disabled = true;
+      try {
+        tourResult = await invoke('set_api_keys', { steamgriddb: key, igdbClientId: '', igdbClientSecret: '', clear: false });
+        settings = await invoke('get_settings');
+        for (const id of Object.keys(metaCache)) if (!metaCache[id].cached) delete metaCache[id];
+      } catch (e) {
+        tourResult = [{ ok: false, message: String(e) }];
+      }
+    }
+  }
+  renderTour();
+}
+
+function openTour() {
+  tourStep = 0;
+  tourResult = null;
+  $('#tour').hidden = false;
+  renderTour();
+}
+
+function closeTour() {
+  $('#tour').hidden = true;
+  try { localStorage.setItem(TOUR_SEEN, '1'); } catch { /* shown again next time */ }
+}
+
+function tourSeen() {
+  try { return localStorage.getItem(TOUR_SEEN) === '1'; } catch { return true; }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#tour').hidden) closeTour();
+});
+
 $('#btn-profile').addEventListener('click', openProfiles);
 $('#btn-stats').addEventListener('click', openStats);
 $('#btn-settings').addEventListener('click', async () => {
@@ -3061,5 +3279,6 @@ refresh()
     await loadProfiles();
     // A shortcut opening a game skips the question: it is already clear who is playing.
     if (!pending && profiles && profiles.ask_on_start && profiles.list.length > 1) whoOpen();
+    else if (!pending && !tourSeen()) openTour();
   })
   .then(() => invoke('check_updates').then((list) => { games = list; render(); }).catch(() => {}));

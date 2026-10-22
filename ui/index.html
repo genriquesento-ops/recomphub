@@ -12,12 +12,24 @@
     <button id="btn-profile" class="ghost profile-chip" title="Trocar de perfil"></button>
     <div class="actions">
       <button id="btn-tv" class="ghost" title="Biblioteca em tela cheia, com controle ou teclado">Modo TV</button>
-      <button id="btn-stats" class="ghost">Estatísticas</button>
-      <button id="btn-covers" class="ghost">Capas</button>
-      <button id="btn-backup" class="ghost">Backup dos saves</button>
-      <button id="btn-updates" class="ghost">Verificar atualizações</button>
-      <button id="btn-add-pc">Adicionar jogo de PC</button>
-      <button id="btn-add" class="primary">Adicionar port</button>
+      <div class="menu">
+        <button class="ghost" data-menu aria-haspopup="true">Mais ▾</button>
+        <div class="menu-list" hidden>
+          <button id="btn-stats">Estatísticas</button>
+          <button id="btn-covers">Capas</button>
+          <button id="btn-backup">Backup dos saves</button>
+          <button id="btn-updates">Verificar atualizações</button>
+          <button id="btn-tour">Tutorial</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="primary" data-menu aria-haspopup="true">Adicionar ▾</button>
+        <div class="menu-list" hidden>
+          <button id="btn-discover">Instalar um port (Descobrir)</button>
+          <button id="btn-add">Port que já está no PC</button>
+          <button id="btn-add-pc">Jogo de PC</button>
+        </div>
+      </div>
       <button id="btn-settings" class="ghost" title="Configurações">⚙</button>
     </div>
   </header>
@@ -45,6 +57,7 @@
     <section id="detail" hidden></section>
   </main>
 
+  <div id="tour" class="tour" hidden></div>
   <div id="toast" class="toast" hidden></div>
 
   <script src="app.js"></script>

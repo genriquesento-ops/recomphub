@@ -186,6 +186,22 @@ pub fn driver_page(vendor: &str) -> Option<&'static str> {
     }
 }
 
+/// Screens made by software (remote access, streaming, extra monitors): their "driver" says
+/// nothing about the games, and they are never the card a game runs on.
+fn is_virtual(g: &Gpu) -> bool {
+    const NAMES: &[&str] = &[
+        "parsec", "virtual display", "remote display", "meta virtual", "spacedesk", "iddsample", "indirect display",
+        "vmware svga", "virtualbox", "hyper-v video", "citrix",
+    ];
+    let n = g.name.to_lowercase();
+    NAMES.iter().any(|v| n.contains(v))
+}
+
+/// A real video card with its driver (not Windows' basic adapter nor a virtual display).
+pub fn is_card(g: &Gpu) -> bool {
+    !is_basic(g) && !is_virtual(g)
+}
+
 fn is_basic(g: &Gpu) -> bool {
     let n = g.name.to_lowercase();
     n.contains("basic display") || n.contains("basic render") || n.contains("vídeo básico") || n.contains("video basico")
@@ -207,11 +223,11 @@ pub fn check(info: &PcInfo, required: &[String], now: u64) -> Vec<Finding> {
             link: None,
         });
     }
-    let real: Vec<&Gpu> = info.gpus.iter().filter(|g| !is_basic(g)).collect();
+    let real: Vec<&Gpu> = info.gpus.iter().filter(|g| is_card(g)).collect();
     if real.is_empty() {
         out.push(Finding {
             level: "bad",
-            text: if info.gpus.is_empty() {
+            text: if info.gpus.iter().all(is_virtual) {
                 "Não encontrei nenhuma placa de vídeo. Os ports precisam de uma placa com DirectX 12 ou Vulkan e o driver dela instalado.".into()
             } else {
                 "O Windows está usando o \"Adaptador de vídeo básico\": o driver da sua placa de vídeo não está instalado. Instale o driver no site do fabricante da placa ou do notebook.".into()
@@ -281,7 +297,7 @@ pub fn set_gpu_preference(exe: &std::path::Path, pref: u8) -> Result<(), String>
 
 /// The video cards and their driver versions, to notice a driver update.
 pub fn driver_signature(info: &PcInfo) -> String {
-    info.gpus.iter().filter(|g| !is_basic(g)).map(|g| format!("{}={}", g.name, g.driver_version)).collect::<Vec<_>>().join(";")
+    info.gpus.iter().filter(|g| is_card(g)).map(|g| format!("{}={}", g.name, g.driver_version)).collect::<Vec<_>>().join(";")
 }
 
 /// Plain text for "Copiar informações do PC" (problem reports).
@@ -358,6 +374,15 @@ mod tests {
         assert_eq!(f[0].link.as_ref().unwrap().1, "https://www.amd.com/pt/support/download/drivers.html");
         let basic = pc(&[], vec![gpu("Microsoft Basic Display Adapter", None)]);
         assert_eq!(check(&basic, &[], now)[0].level, "bad");
+    }
+
+    #[test]
+    fn virtual_displays_are_not_cards() {
+        let now = 1_800_000_000;
+        let old = Some(now - 900 * 86_400);
+        let pc = pc(&["avx"], vec![gpu("Parsec Virtual Display Adapter", old), gpu("NVIDIA GeForce RTX 3060", Some(now))]);
+        assert!(check(&pc, &[], now).iter().all(|f| f.level == "ok"));
+        assert_eq!(driver_signature(&pc).matches('=').count(), 1);
     }
 
     #[test]

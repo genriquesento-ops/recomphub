@@ -1340,7 +1340,7 @@ async fn get_graphics(app: AppHandle, id: String) -> Result<GraphicsView, String
         _ => None,
     };
     Ok(GraphicsView {
-        gpus: info.gpus.iter().filter(|g| !g.name.to_lowercase().contains("basic")).map(|g| g.name.clone()).collect(),
+        gpus: info.gpus.iter().filter(|g| pcinfo::is_card(g)).map(|g| g.name.clone()).collect(),
         preference: pcinfo::gpu_preference(&exe),
         api,
         n64,
@@ -3079,7 +3079,7 @@ pub(crate) fn check_crash(app: &AppHandle, id: &str, since: u64, seconds: Option
         has_shader_cache: game.is_some_and(|g| !g.shader_cache.is_empty()),
         driver_changed: !current.is_empty() && entry.shader_driver.as_ref().is_some_and(|r| *r != current),
         n64_api: n64.and_then(|g| files::n64_graphics_api(g, &dir)),
-        gpus: info.gpus.iter().filter(|g| !g.name.to_lowercase().contains("basic")).count(),
+        gpus: info.gpus.iter().filter(|g| pcinfo::is_card(g)).count(),
         mods_on: game
             .filter(|g| g.mods.is_some())
             .and_then(|g| files::n64_data_dir(g, &dir))

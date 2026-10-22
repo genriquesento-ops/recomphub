@@ -435,3 +435,47 @@ button.small { font-size: 12px; padding: 4px 10px; }
 /* "O jogo fechou com erro": the report people paste into an issue */
 .crash-report { max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px;
   padding: 8px; border: 1px solid var(--line); margin: 6px 0; }
+
+/* Top bar menus ("Mais", "Adicionar") */
+.menu { position: relative; }
+.menu-list {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 6; min-width: 240px;
+  display: flex; flex-direction: column; padding: 4px 0;
+  background: var(--panel); border: 1px solid var(--line); border-top: 2px solid var(--rule);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
+}
+.menu-list[hidden] { display: none; }
+.menu-list button { border: 0; border-radius: 0; text-align: left; padding: 9px 16px; color: var(--text); background: none; box-shadow: none; }
+.menu-list button:hover:not(:disabled) { background: var(--panel-2); transform: none; box-shadow: none; }
+.topbar .actions { align-items: center; gap: 6px; }
+
+/* The game page: tabs below Jogar */
+.page-tabs { margin: 26px 0 0; }
+.pane[hidden] { display: none; }
+.pane > .box:first-child, .pane > details.box:first-child { border-top-color: transparent; }
+.detail > div:nth-child(2) { max-width: 860px; }
+.path { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
+.key-help { margin: 4px 0 8px; }
+.key-help summary { cursor: pointer; color: var(--muted); }
+.key-help summary:hover { color: var(--text); }
+
+/* Tutorial */
+.tour {
+  position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(10, 9, 8, .78);
+}
+.tour[hidden] { display: none; }
+.tour-card {
+  width: min(580px, 100%); max-height: calc(100vh - 32px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--red); padding: 26px 30px 18px;
+}
+.tour-card h2 { margin: 2px 0 14px; font-size: 26px; font-stretch: 118%; }
+.tour-count { margin: 0; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--red); }
+.tour-body p { margin: 8px 0; }
+.tour-body ol, .tour-body ul { padding-left: 22px; }
+.tour-body li { margin: 6px 0; }
+.tour-body ol li::marker { font-family: var(--mono); color: var(--red); }
+.tour-nav { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
+.tour-nav .grow { flex: 1; }
+.topbar .actions { flex-wrap: nowrap; }
+.topbar .profile-chip span { white-space: nowrap; }
