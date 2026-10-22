@@ -1,12 +1,13 @@
 # Passagem de bastão (handoff)
 
-Atualizado em 20/10/2026. Para quem pegar o projeto agora (pessoa ou Claude): onde estamos, o que já foi
+Atualizado em 21/10/2026. Para quem pegar o projeto agora (pessoa ou Claude): onde estamos, o que já foi
 feito, o que deu errado e o que falta.
 
 ## Onde estamos
 
 - **Versão publicada:** v0.25.0 (21/10/2026). Junta tudo desde a 0.20: variáveis de ambiente no modo administrador, Seu PC (compatibilidade, placa de vídeo, API gráfica, antivírus), contador de FPS (PresentMon), God of War III como SpartanPort com cache de shaders, e a aba Comunidade com .7z, .exe portátil, nome do jogo, tópicos novos e fotos. Publicada a pedido do Gustavo; as partes novas ainda não foram testadas por ele no Windows.
-- **Catálogo remoto:** a revisão 6 já está no ar para todos (o God of War III aponta para o SpartanPort).
+- **Pronta para teste, não publicada:** v0.26.0, com o diagnóstico de erro ("O jogo fechou com erro", botão "Procurar o erro", relatório para issue). O CI passou com 78 testes; o instalador está em `Desktopcaludeinstalador`. Falta o Gustavo testar e autorizar a tag.
+- **Catálogo remoto:** a revisão 7 já está no ar (o God of War III ganhou o campo `logs`; versões antigas ignoram).
 - **Repositório:** público, licença MIT, na organização `recomphub-app`:
   https://github.com/recomphub-app/recomphub (o Gustavo é administrador).
 - **Site:** https://recomphub-app.github.io/recomphub/ (GitHub Pages; fica no ar com o PC desligado).

@@ -35,6 +35,7 @@ Enquanto o repositório for privado, o endereço remoto responde 404 e só a có
 | `exe`, `icon` | Programa aberto pelo Jogar e ícone dos atalhos (caminhos dentro da pasta do port). |
 | `markers` | Arquivos que identificam uma pasta como sendo deste port. |
 | `legacy_exe`, `legacy_markers` | Opcionais. Nomes de antes de o projeto mudar de nome: uma instalação antiga continua reconhecida (todos os `legacy_markers`) e o Jogar abre o `legacy_exe` até o jogador atualizar. |
+| `logs` | Opcional. Arquivos de log do port (`{install}` permitido). Quando o jogo fecha com erro, o fim de cada um que existir entra no relatório. |
 | `shader_cache` | Opcional. Pastas onde o port guarda os shaders compilados (`{install}` permitido). Liga a caixa "Cache de shaders" na página do jogo. Ponha a pasta também em `keep_on_update` para ela sobreviver a atualizações e desinstalações. |
 | `keep_on_update` | Arquivos ou pastas (terminadas em `/`) que a atualização não sobrescreve. |
 | `requirements`, `needs`, `files_help` | Textos da página do jogo. |

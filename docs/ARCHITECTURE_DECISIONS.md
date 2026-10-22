@@ -288,6 +288,18 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     botões de doação, até 8 MB, com limite de pixels e de memória antes de abrir a imagem. As
     miniaturas (360×360, JPEG) ficam em `comunidade-imagens/` e chegam aos poucos, em segundo
     plano; um port sem imagem é tentado de novo depois de uma semana.
+55. **Diagnóstico de erro só com o que o PC já guarda.** Quando uma sessão termina, o RecompHUB
+    junta quatro fontes: o código de saída do programa que ele abriu (uma DLL faltando nunca
+    chega ao registro do Windows), o evento 1000 "Application Error" do Windows (código e
+    módulo, vale também para jogos abertos como administrador ou por fora), os crash dumps de
+    `%LOCALAPPDATA%\CrashDumps` e o fim dos logs do port (campo `logs` do catálogo). Só aparece
+    aviso com sinal concreto: código de falha (NTSTATUS ou exceção C++), evento, dump ou sessão
+    de menos de 15 segundos; "Fechar jogo" nunca conta como erro, e o código de um launcher que
+    sai normalmente é ignorado. A explicação vem de regras fixas (instrução ilegal → processador,
+    DLL → Visual C++, módulo do driver → driver e Vulkan, sobreposições conhecidas), nunca de
+    IA. O relatório esconde o nome da pasta do usuário e só sai do PC quando o jogador cola. O
+    driver só é lembrado depois de uma sessão que terminou bem, para "o driver mudou desde a
+    última vez que funcionou" continuar valendo depois de um fechamento com erro.
 
 ## Capas
 
