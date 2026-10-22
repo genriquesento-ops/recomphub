@@ -300,6 +300,12 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     IA. O relatório esconde o nome da pasta do usuário e só sai do PC quando o jogador cola. O
     driver só é lembrado depois de uma sessão que terminou bem, para "o driver mudou desde a
     última vez que funcionou" continuar valendo depois de um fechamento com erro.
+56. **Página do jogo em abas.** No alto ficam só Jogar e o que exige ação agora (versão nova,
+    erro ao fechar, PC que não roda o port, arquivos faltando). O resto vai para abas: Visão geral,
+    Mods, Saves, Conquistas e Ajustes; as Configurações seguem o mesmo modelo. O topo tem dois
+    menus (Mais e Adicionar) em vez de oito botões. Na primeira abertura, um tutorial de seis
+    passos explica o programa e ajuda a colar a chave da SteamGridDB; ele volta em Mais > Tutorial.
+    Telas virtuais (Parsec, Spacedesk, monitores IDD) não contam como placa de vídeo.
 
 ## Capas
 
