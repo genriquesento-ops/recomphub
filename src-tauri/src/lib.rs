@@ -17,6 +17,7 @@ mod meta;
 mod mods;
 mod pcinfo;
 mod play;
+mod precheck;
 mod profiles;
 mod ra;
 mod reg;
@@ -1300,12 +1301,57 @@ async fn get_pc_info(refresh: bool) -> Result<PcView, String> {
     Ok(PcView { report: pcinfo::report(&info), info })
 }
 
-/// What this PC means for one game: blocking problems first, then common causes of trouble.
+/// What this PC means for one game ("Antes de jogar"): blocking problems first, then common
+/// causes of trouble. For an installed game also its own files (precheck.rs). PC games only get
+/// the checks of their own files; the port requirements say nothing about them.
 #[tauri::command]
-async fn pc_check(id: String) -> Result<Vec<pcinfo::Finding>, String> {
-    let required = catalog::get(&id).map(|g| g.cpu_features.clone()).unwrap_or_default();
-    let info = tauri::async_runtime::spawn_blocking(|| pcinfo::get(false)).await.map_err(|e| e.to_string())?;
-    Ok(pcinfo::check(&info, &required, library::now()))
+async fn pc_check(app: AppHandle, id: String) -> Result<Vec<pcinfo::Finding>, String> {
+    let port = catalog::get(&id);
+    let required = port.map(|g| g.cpu_features.clone()).unwrap_or_default();
+    let entry = app.state::<AppState>().library.lock().unwrap().games.get(&id).cloned();
+    let exe = entry.as_ref().and_then(|e| program_of(&id, e).map(|x| Path::new(&e.install_dir).join(x)));
+    let kind = entry.as_ref().map(|e| e.kind).unwrap_or_default();
+    let keeps_saves_inside = match kind {
+        library::EntryKind::Community => true,
+        library::EntryKind::Port => port.is_some_and(|g| g.saves.iter().any(|s| s.contains("{install}"))),
+        library::EntryKind::PcGame => false,
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out = if kind == library::EntryKind::PcGame { Vec::new() } else { pcinfo::check(&pcinfo::get(false), &required, library::now()) };
+        let own = exe.map(|x| precheck::check_game(&x, keeps_saves_inside)).unwrap_or_default();
+        if !own.is_empty() {
+            // The same fix found twice (Visual C++ missing for the PC and for this game): keep
+            // the game's, which says which files.
+            out.retain(|f| f.level != "ok" && !own.iter().any(|o| o.fix.is_some() && o.fix == f.fix));
+            out.extend(own);
+        }
+        out.sort_by_key(|f| match f.level {
+            "bad" => 0,
+            "warn" => 1,
+            _ => 2,
+        });
+        out
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// "Instalar Visual C++" / "Instalar DirectX": from Microsoft only, signature checked, one
+/// administrator prompt. Returns the message for the player.
+#[tauri::command]
+async fn install_runtime(which: String) -> Result<String, String> {
+    let rt = precheck::runtime(&which).ok_or("Pacote desconhecido.")?;
+    let msg = tauri::async_runtime::spawn_blocking(move || precheck::install(rt)).await.map_err(|e| e.to_string())??;
+    // The page asks again with what is installed now.
+    tauri::async_runtime::spawn_blocking(|| pcinfo::get(true)).await.map_err(|e| e.to_string())?;
+    Ok(msg)
+}
+
+/// "Baixar agora": brings the game's OneDrive cloud-only files to this PC.
+#[tauri::command]
+async fn hydrate_game(app: AppHandle, id: String) -> Result<usize, String> {
+    let dir = app.state::<AppState>().library.lock().unwrap().games.get(&id).map(|e| PathBuf::from(&e.install_dir)).ok_or("Jogo fora da biblioteca.")?;
+    tauri::async_runtime::spawn_blocking(move || precheck::hydrate(&dir)).await.map_err(|e| e.to_string())?
 }
 
 /// The game's program, for Windows' per-program graphics setting.
@@ -3000,7 +3046,13 @@ fn play(app: AppHandle, id: String) -> Result<(), String> {
     let v = view_any(&state, &id)?;
     match v.status {
         "ready" => {}
-        "running" | "starting" => return Err("O jogo já está aberto.".into()),
+        "running" => {
+            // Clicking Jogar again brings the game's window to the front instead of a second copy.
+            let entry = state.library.lock().unwrap().games.get(&id).cloned().ok_or("Jogo fora da biblioteca.")?;
+            let name = program_of(&id, &entry).and_then(|x| play::exe_name(&x));
+            return if play::focus(Path::new(&entry.install_dir), name.as_deref()) { Ok(()) } else { Err("O jogo já está aberto.".into()) };
+        }
+        "starting" => return Err("O jogo já está aberto.".into()),
         "needs_files" => return Err("Faltam os arquivos do jogo. Veja os detalhes na página do jogo.".into()),
         "installing" => return Err("Espere a instalação terminar.".into()),
         "missing" => return Err("O programa do jogo não está mais no lugar. Ele foi movido ou apagado?".into()),
@@ -3415,6 +3467,8 @@ pub fn run() {
             skip_update,
             get_pc_info,
             pc_check,
+            install_runtime,
+            hydrate_game,
             get_graphics,
             set_gpu_preference,
             set_graphics_api,

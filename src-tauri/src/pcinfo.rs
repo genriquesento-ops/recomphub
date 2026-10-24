@@ -172,6 +172,8 @@ pub struct Finding {
     pub text: String,
     /// A page that solves it (driver or runtime download page).
     pub link: Option<(String, String)>,
+    /// A one-click fix the page offers ("vc_x64", "vc_x86", "directx", "hydrate").
+    pub fix: Option<&'static str>,
 }
 
 const DRIVER_OLD_DAYS: u64 = 730;
@@ -221,6 +223,7 @@ pub fn check(info: &PcInfo, required: &[String], now: u64) -> Vec<Finding> {
                 missing.iter().map(|m| m.to_uppercase()).collect::<Vec<_>>().join(", ")
             ),
             link: None,
+            fix: None,
         });
     }
     let real: Vec<&Gpu> = info.gpus.iter().filter(|g| is_card(g)).collect();
@@ -233,6 +236,7 @@ pub fn check(info: &PcInfo, required: &[String], now: u64) -> Vec<Finding> {
                 "O Windows está usando o \"Adaptador de vídeo básico\": o driver da sua placa de vídeo não está instalado. Instale o driver no site do fabricante da placa ou do notebook.".into()
             },
             link: None,
+            fix: None,
         });
     }
     for g in &real {
@@ -247,6 +251,7 @@ pub fn check(info: &PcInfo, required: &[String], now: u64) -> Vec<Finding> {
                     days / 365
                 ),
                 link: driver_page(g.vendor).map(|u| (format!("Baixar driver {}", g.vendor), u.to_string())),
+                fix: None,
             });
         }
     }
@@ -255,6 +260,7 @@ pub fn check(info: &PcInfo, required: &[String], now: u64) -> Vec<Finding> {
             level: "warn",
             text: "O Visual C++ 2015-2022 (x64) da Microsoft não está instalado. Muitos ports precisam dele para abrir.".into(),
             link: Some(("Página da Microsoft".into(), VC_PAGE.into())),
+            fix: Some("vc_x64"),
         });
     }
     if info.build > 0 && info.build < 19045 {
@@ -262,10 +268,11 @@ pub fn check(info: &PcInfo, required: &[String], now: u64) -> Vec<Finding> {
             level: "warn",
             text: format!("Seu Windows ({}) está desatualizado. Os ports são testados no Windows 10 22H2 e no Windows 11; atualize pelo Windows Update.", info.windows),
             link: None,
+            fix: None,
         });
     }
     if out.is_empty() {
-        out.push(Finding { level: "ok", text: "Nada no seu PC impede este port de rodar.".into(), link: None });
+        out.push(Finding { level: "ok", text: "Nada no seu PC impede este port de rodar.".into(), link: None, fix: None });
     }
     out
 }

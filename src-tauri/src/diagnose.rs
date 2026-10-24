@@ -168,10 +168,10 @@ pub fn findings(c: &Context) -> Vec<Finding> {
             out.push(Finding {
                 level: "bad",
                 text: format!(
-                    "O jogo não conseguiu carregar uma DLL ({code}). Quase sempre é o Visual C++ 2015-2022 (x64) da Microsoft{}. Instale ou repare pela página da Microsoft e abra o jogo de novo. Se continuar, o antivírus pode ter apagado uma DLL da pasta do port: reinstale o port.",
+                    "O jogo não conseguiu carregar uma DLL ({code}). Quase sempre é o Visual C++ 2015-2022 (x64) da Microsoft{}. Instale ou repare (o RecompHUB baixa da Microsoft) e abra o jogo de novo. Se continuar, o antivírus pode ter apagado uma DLL da pasta do port: reinstale o port.",
                     if c.vc_runtime { ", que pode estar danificado" } else { ", que não está instalado no seu PC" }
                 ),
-                action: Some(Action { label: "Página do Visual C++".into(), act: "link", value: Some(crate::pcinfo::VC_PAGE.into()) }),
+                action: Some(Action { label: "Instalar Visual C++".into(), act: "fix-runtime", value: Some("vc_x64".into()) }),
             });
         }
         Some(ACCESS_DENIED) => {
@@ -518,7 +518,7 @@ mod tests {
         assert!(cpu[0].text.contains("AVX"));
 
         let dll = findings(&Context { code: Some(0xC000_0135), ..Default::default() });
-        assert_eq!(dll[0].action.as_ref().unwrap().act, "link");
+        assert_eq!(dll[0].action.as_ref().unwrap().act, "fix-runtime");
 
         let driver = findings(&Context {
             code: Some(0xC000_0005),

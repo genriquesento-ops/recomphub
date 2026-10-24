@@ -286,7 +286,7 @@ function playRow(g, what) {
     return `
       <div class="row">
         <button class="primary play" disabled>${g.status === 'running' ? `Jogando há ${sessionLength(g)}` : 'Abrindo…'}</button>
-        ${g.status === 'running' ? '<button class="danger" data-act="stop">Fechar jogo</button>' : ''}
+        ${g.status === 'running' ? '<button data-act="play">Mostrar o jogo</button><button class="danger" data-act="stop">Fechar jogo</button>' : ''}
       </div>
       <p class="muted">O tempo é contado enquanto ${what} estiver aberto e salvo a cada 30 segundos.</p>`;
   }
@@ -339,6 +339,8 @@ function renderPcDetail(g) {
         ${playRow(g, 'o jogo')}
         ${missing}
         ${crashBox(g)}
+        ${pcCheckBox(g, 'bad')}
+        ${pcCheckBox(g, 'warn')}
         ${pageTabs(g.id, [
           ['geral', 'Visão geral', ''],
           ['saves', 'Saves', ''],
@@ -1337,13 +1339,24 @@ async function loadGfx(id) {
   if (openId === id) render();
 }
 
+const FIX_LABEL = { vc_x64: 'Instalar Visual C++', vc_x86: 'Instalar Visual C++ (x86)', directx: 'Instalar DirectX', hydrate: 'Baixar agora' };
+
 function findingLink(f) {
-  return f.link ? ` <button class="link" data-act="link" data-url="${esc(f.link[1])}">${esc(f.link[0])}</button>` : '';
+  const fix = f.fix && FIX_LABEL[f.fix]
+    ? ` <button class="small${f.level === 'bad' ? ' primary' : ''}" data-act="${f.fix === 'hydrate' ? 'fix-hydrate' : 'fix-runtime'}" data-v="${esc(f.fix)}">${FIX_LABEL[f.fix]}</button>`
+    : '';
+  return fix + (f.link ? ` <button class="link" data-act="link" data-url="${esc(f.link[1])}">${esc(f.link[0])}</button>` : '');
 }
 
-// `which`: 'bad' for the top of the page (only when the port cannot run here), 'warn' for Ajustes.
+// After a fix everything is checked again (a runtime counts for every game).
+async function recheckAll() {
+  for (const k of Object.keys(pcChecks)) delete pcChecks[k];
+  pcInfo = openId === '__settings' ? await invoke('get_pc_info', { refresh: false }).catch(() => pcInfo) : null;
+  render();
+}
+
+// `which`: 'bad' for the top of the page (only when the game cannot run as it is), 'warn' for Ajustes.
 function pcCheckBox(g, which = 'bad') {
-  if (g.kind === 'pc_game') return '';
   const list = pcChecks[g.id];
   if (list === undefined) {
     setTimeout(() => loadPcCheck(g.id), 0);
@@ -1357,12 +1370,15 @@ function pcCheckBox(g, which = 'bad') {
   }
   const items = list.filter((x) => x.level !== 'ok')
     .map((x) => `<li class="${x.level === 'bad' ? 'bad-text' : ''}">${esc(x.text)}${findingLink(x)}</li>`).join('');
+  const fixable = list.some((x) => x.level === 'bad' && x.fix);
+  const checked = g.kind === 'pc_game'
+    ? 'O RecompHUB conferiu os arquivos que o jogo usa (DLLs, OneDrive, caminhos longos).'
+    : 'O RecompHUB conferiu processador, placa de vídeo, driver, Windows, o Visual C++ e os arquivos que o jogo usa. Detalhes em Configurações > Seu PC.';
   return `
     <div class="box ${bad ? 'bad' : 'warn'}">
-      <h3>${bad ? 'Este port não deve rodar no seu PC' : 'Seu PC: pode dar problema'}</h3>
+      <h3>${!bad ? 'Antes de jogar: pode dar problema' : fixable ? 'Antes de jogar: falta uma coisa' : 'Este jogo não deve abrir assim'}</h3>
       <ul>${items}</ul>
-      <p class="muted">O RecompHUB conferiu processador, placa de vídeo, driver, Windows e o Visual C++.
-        Detalhes em Configurações > Seu PC.</p>
+      <p class="muted">${checked}</p>
     </div>`;
 }
 
@@ -1558,7 +1574,7 @@ function pcInfoBox() {
         <dt>Processador</dt><dd>${esc(i.cpu)}<br><span class="muted">Instruções: ${esc(i.cpu_features.join(', ').toUpperCase())}</span></dd>
         <dt>Memória</dt><dd>${i.ram_gb} GB</dd>
         <dt>Vídeo</dt><dd><ul>${gpus}</ul></dd>
-        <dt>Visual C++</dt><dd>${i.vc_runtime ? 'instalado' : '<span class="bad-text">não encontrado</span> <button class="link" data-act="link" data-url="https://learn.microsoft.com/pt-br/cpp/windows/latest-supported-vc-redist">página da Microsoft</button>'}</dd>
+        <dt>Visual C++</dt><dd>${i.vc_runtime ? 'instalado' : '<span class="bad-text">não encontrado</span> <button class="small primary" data-act="fix-runtime" data-v="vc_x64">Instalar Visual C++</button> <button class="link" data-act="link" data-url="https://learn.microsoft.com/pt-br/cpp/windows/latest-supported-vc-redist">página da Microsoft</button>'}</dd>
       </dl>
       <div class="row">
         <button data-act="pc-copy">Copiar informações</button>
@@ -2465,6 +2481,27 @@ async function act(action, g, el) {
     case 'win-security':
       await call('open_windows_security');
       break;
+    case 'fix-runtime': {
+      document.querySelectorAll('[data-act="fix-runtime"]').forEach((b) => (b.disabled = true));
+      toast('Baixando da Microsoft… o Windows vai pedir permissão de administrador para instalar.');
+      try {
+        toast(await call('install_runtime', { which: el.dataset.v }));
+      } finally {
+        recheckAll();
+      }
+      break;
+    }
+    case 'fix-hydrate': {
+      el.disabled = true;
+      toast('Baixando os arquivos do OneDrive…');
+      try {
+        const n = await call('hydrate_game', { id: g.id });
+        toast(n ? `${n} arquivo${n > 1 ? 's' : ''} baixado${n > 1 ? 's' : ''} do OneDrive.` : 'Os arquivos já estavam no PC.');
+      } finally {
+        recheckAll();
+      }
+      break;
+    }
     case 'page-tab':
       pageTab[el.dataset.k] = el.dataset.v;
       render();
@@ -3056,8 +3093,13 @@ function tvMove(dx, dy) {
 async function tvPlay() {
   const g = tvGames()[tvSel];
   if (!g) return;
+  if (g.status === 'running') {
+    // Brings the open game to the front.
+    await invoke('play', { id: g.id }).catch(() => toast(`${g.title} já está aberto.`, true));
+    return;
+  }
   if (g.status !== 'ready') {
-    toast(g.status === 'running' ? `${g.title} já está aberto.` : `${g.title}: ${STATUS_TEXT[g.status]}. Saia do Modo TV para resolver.`, true);
+    toast(`${g.title}: ${STATUS_TEXT[g.status]}. Saia do Modo TV para resolver.`, true);
     return;
   }
   try {

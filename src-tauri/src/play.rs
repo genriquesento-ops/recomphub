@@ -548,6 +548,93 @@ fn shell_runas(exe_path: &Path, dir: &Path, params: &str) -> Result<(), String> 
     }
 }
 
+/// Starts `exe_path` as administrator (one UAC prompt) and waits for it to finish: the
+/// installers of "Antes de jogar". Returns its exit code.
+pub fn runas_and_wait(exe_path: &Path, params: &str) -> Result<u32, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+    use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let verb = wide(std::ffi::OsStr::new("runas"));
+    let file = wide(exe_path.as_os_str());
+    let params = wide(std::ffi::OsStr::new(params));
+    // SAFETY: every pointer is to a NUL-terminated buffer that lives until the call returns;
+    // the process handle is closed after use.
+    let (ok, process) = unsafe {
+        let mut info: SHELLEXECUTEINFOW = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = file.as_ptr();
+        info.lpParameters = params.as_ptr();
+        info.nShow = SW_SHOWNORMAL;
+        let ok = ShellExecuteExW(&mut info) != 0;
+        (ok, info.hProcess)
+    };
+    if !ok {
+        let err = std::io::Error::last_os_error();
+        return Err(if err.raw_os_error() == Some(ERROR_CANCELLED) {
+            "Você não deu a permissão de administrador, então nada foi instalado.".into()
+        } else {
+            format!("O Windows não abriu o instalador: {err}")
+        });
+    }
+    if process.is_null() {
+        return Err("O Windows abriu o instalador, mas não deixou o RecompHUB acompanhar. Confira em Configurações > Aplicativos se ele foi instalado.".into());
+    }
+    let mut code: u32 = 0;
+    // SAFETY: `process` is a valid handle from ShellExecuteExW, closed once.
+    unsafe {
+        WaitForSingleObject(process, INFINITE);
+        GetExitCodeProcess(process, &mut code);
+        CloseHandle(process);
+    }
+    Ok(code)
+}
+
+/// Brings a running game's window to the front (restoring it when minimized). False when no
+/// window of the game's processes was found.
+pub fn focus(install_dir: &Path, exe_name: Option<&str>) -> bool {
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow, GW_OWNER, SW_RESTORE,
+    };
+    struct Search {
+        pids: Vec<u32>,
+        found: HWND,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let s = &mut *(lparam as *mut Search);
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if s.pids.contains(&pid) && IsWindowVisible(hwnd) != 0 && GetWindow(hwnd, GW_OWNER).is_null() {
+            s.found = hwnd;
+            return 0;
+        }
+        1
+    }
+    let mut sys = System::new();
+    refresh(&mut sys);
+    let pids: Vec<u32> = processes_in(&sys, &folder_prefix(install_dir), exe_name).iter().map(|p| p.as_u32()).collect();
+    if pids.is_empty() {
+        return false;
+    }
+    let mut search = Search { pids, found: std::ptr::null_mut() };
+    // SAFETY: `search` outlives EnumWindows, which calls `each` synchronously.
+    unsafe {
+        EnumWindows(Some(each), &mut search as *mut Search as LPARAM);
+        if search.found.is_null() {
+            return false;
+        }
+        if IsIconic(search.found) != 0 {
+            ShowWindow(search.found, SW_RESTORE);
+        }
+        SetForegroundWindow(search.found) != 0
+    }
+}
+
 pub fn start(
     app: &AppHandle,
     id: &str,

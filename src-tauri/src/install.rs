@@ -230,7 +230,7 @@ fn place(app: &AppHandle, id: &str, staging: &Path, target: &Path, keep: &[Strin
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::copy(staging.join(rel), &out).map_err(|e| {
-            crate::play::antivirus_error(&e).unwrap_or_else(|| format!("Não consegui gravar {} (o jogo está aberto?): {e}", out.display()))
+            crate::precheck::write_error(&e, &out)
         })?;
         if i % 16 == 0 {
             emit(app, id, "extract", i as u64, total);
@@ -274,7 +274,7 @@ fn extract(app: &AppHandle, id: &str, zip_path: &Path, target: &Path, keep: &[St
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let mut f = std::fs::File::create(&out).map_err(|e| {
-            crate::play::antivirus_error(&e).unwrap_or_else(|| format!("Não consegui gravar {} (o jogo está aberto?): {e}", out.display()))
+            crate::precheck::write_error(&e, &out)
         })?;
         std::io::copy(&mut entry, &mut f).map_err(|e| crate::play::antivirus_error(&e).unwrap_or_else(|| e.to_string()))?;
         if i % 16 == 0 {
