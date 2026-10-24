@@ -166,7 +166,7 @@ function renderGrid() {
       : 'Sua biblioteca está vazia. Veja os ports disponíveis na aba Descobrir, ou use Adicionar > Port que já está no PC.';
   }
   $('#grid').innerHTML = list.map((g) => `
-    <div class="card" data-id="${g.id}">
+    <div class="card" data-id="${g.id}" tabindex="0">
       ${coverHtml(g)}
       <div class="body">
         <div class="title">${esc(g.title)}</div>
@@ -754,7 +754,7 @@ async function openProfiles() {
 
 // "Quem vai jogar?": mouse, keyboard (setas + Enter) or controller (direcional + A).
 let whoSel = 0;
-const whoPad = { held: {}, nextAt: 0, repeating: false };
+const whoPad = { held: {}, nextAt: 0 };
 
 function renderWho() {
   const el = $('#who');
@@ -762,7 +762,7 @@ function renderWho() {
     <h1>Quem vai jogar?</h1>
     <div class="who-list">${profiles.list.map((x, i) => `
       <button class="who-item${i === whoSel ? ' sel' : ''}" data-i="${i}">${avatar(x, true)}<span>${esc(x.name)}</span></button>`).join('')}</div>
-    <p class="muted">Use o mouse, as setas e Enter, ou o direcional e o botão A do controle.</p>`;
+    <p class="muted">Use o mouse, as setas e Enter, ou o direcional e o botão ${padName('ok')} do controle.</p>`;
   el.querySelectorAll('.who-item').forEach((b) => b.addEventListener('click', () => whoPick(Number(b.dataset.i))));
 }
 
@@ -786,26 +786,12 @@ function whoMove(dx) {
 
 function whoPoll(t) {
   if ($('#who').hidden) return;
-  const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
-  if (pad) {
-    const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
-    const ax = pad.axes[0] || 0;
-    const left = b(14) || ax < -0.5;
-    const right = b(15) || ax > 0.5;
-    const a = b(0);
-    if (a && !whoPad.held.a) whoPick(whoSel);
-    whoPad.held.a = a;
-    if (left || right) {
-      if (!whoPad.held.dir || t >= whoPad.nextAt) {
-        whoMove(right ? 1 : -1);
-        whoPad.nextAt = t + (whoPad.repeating ? 160 : 400);
-        whoPad.repeating = whoPad.held.dir;
-      }
-      whoPad.held.dir = true;
-    } else {
-      whoPad.held.dir = false;
-      whoPad.repeating = false;
-    }
+  const p = readPad();
+  if (p) {
+    if (p.changed) renderWho();
+    const e = padEdges(whoPad, p, t, [400, 160]);
+    if (e.ok) whoPick(whoSel);
+    if (e.dx || e.dy) whoMove(e.dx || e.dy);
   }
   requestAnimationFrame(whoPoll);
 }
@@ -2843,7 +2829,7 @@ function renderCommunityGrid() {
   empty.hidden = list.length > 0 || communityLoading;
   empty.textContent = data.items.length ? 'Nenhum port com esse filtro.' : 'Nenhum port carregado. Verifique a internet e clique em "Atualizar lista".';
   $('#grid').innerHTML = list.map((i) => `
-    <div class="card" data-repo="${esc(i.repo)}">
+    <div class="card" data-repo="${esc(i.repo)}" tabindex="0">
       ${communityCover(i)}
       <div class="body">
         <div class="title">${esc(i.game || i.name)}</div>
@@ -3034,6 +3020,234 @@ function renderCommunityDetail(g) {
     </div>`;
 }
 
+// ---- Controle: which controller, its button names, and the whole program with it ----
+
+// Standard mapping: 0 bottom, 1 right, 2 left, 3 top, 4/5 shoulders, 8 View/Share, 9 Menu/Options,
+// 12-15 d-pad; left stick on axes 0/1. Nintendo confirms with the right button (A).
+const PAD_NAMES = {
+  playstation: { ok: '✕', back: '○', lb: 'L1', rb: 'R1', menu: 'Options' },
+  xbox: { ok: 'A', back: 'B', lb: 'LB', rb: 'RB', menu: 'Menu' },
+  nintendo: { ok: 'A', back: 'B', lb: 'L', rb: 'R', menu: '+' },
+};
+let padKind = null;   // family of the controller last used; null before any
+
+function padFamily(pad) {
+  const id = ((pad && pad.id) || '').toLowerCase();
+  if (/054c|playstation|dualsense|dualshock|wireless controller/.test(id)) return 'playstation';
+  if (/057e|nintendo|pro controller|joy-con/.test(id)) return 'nintendo';
+  return 'xbox';
+}
+
+function padName(which) {
+  return PAD_NAMES[padKind || 'xbox'][which];
+}
+
+// The first connected controller, its family remembered; `changed` when the family is new.
+function readPad() {
+  const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
+  if (!pad) return null;
+  const fam = padFamily(pad);
+  const changed = fam !== padKind;
+  padKind = fam;
+  const b = (i) => !!(pad.buttons[i] && pad.buttons[i].pressed);
+  const swap = fam === 'nintendo';
+  const ax = pad.axes[0] || 0;
+  const ay = pad.axes[1] || 0;
+  return {
+    changed,
+    ok: b(swap ? 1 : 0), back: b(swap ? 0 : 1), lb: b(4), rb: b(5), menu: b(9),
+    left: b(14) || ax < -0.5, right: b(15) || ax > 0.5, up: b(12) || ay < -0.5, down: b(13) || ay > 0.5,
+  };
+}
+
+// Press once, repeat while held (first repeat slower).
+function padEdges(state, p, t, delays = [380, 120]) {
+  const press = (name) => {
+    const was = state.held[name];
+    state.held[name] = p[name];
+    return p[name] && !was;
+  };
+  const out = { ok: press('ok'), back: press('back'), lb: press('lb'), rb: press('rb'), menu: press('menu'), dx: 0, dy: 0 };
+  const any = p.left || p.right || p.up || p.down;
+  if (any && (!state.held.dir || t >= state.nextAt)) {
+    out.dx = p.right - p.left;
+    out.dy = p.down - p.up;
+    state.nextAt = t + (state.held.dir ? delays[1] : delays[0]);
+  }
+  state.held.dir = any;
+  return out;
+}
+
+const navPad = { held: {}, nextAt: 0 };
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex="0"]';
+
+function isShown(el) {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+}
+
+// What the controller can reach: the open dialog only, when there is one.
+function padTargets() {
+  const tour = $('#tour');
+  const root = tour && !tour.hidden ? tour : document;
+  return [...root.querySelectorAll(FOCUSABLE)].filter(isShown);
+}
+
+function padFocus(el) {
+  document.body.classList.add('pad-on');
+  el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  renderPadHints();
+}
+
+// Moves to the nearest element in that direction, preferring ones in line with this one.
+function padMove(dx, dy) {
+  const all = padTargets();
+  if (!all.length) return;
+  const cur = all.includes(document.activeElement) ? document.activeElement : null;
+  if (!cur) {
+    padFocus(all.find((el) => el.matches('#detail .play')) || all.find((el) => el.closest('#grid, #detail')) || all[0]);
+    return;
+  }
+  const c = cur.getBoundingClientRect();
+  const cx = c.left + c.width / 2;
+  const cy = c.top + c.height / 2;
+  let best = null;
+  let bestScore = Infinity;
+  for (const el of all) {
+    if (el === cur) continue;
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const along = dx ? (x - cx) * dx : (y - cy) * dy;
+    if (along <= 2) continue;
+    const across = dx ? Math.abs(y - cy) : Math.abs(x - cx);
+    const score = along + across * 2.5;
+    if (score < bestScore) {
+      best = el;
+      bestScore = score;
+    }
+  }
+  if (best) padFocus(best);
+}
+
+// A click re-renders the page; the same button (or card) gets the focus back.
+function padKey(el) {
+  const d = el.dataset || {};
+  return { act: d.act, id: d.id, v: d.v, k: d.k, elId: el.id, text: el.textContent.trim() };
+}
+
+function padRefocus(key) {
+  const all = padTargets();
+  const same = (el) => {
+    const k = padKey(el);
+    if (key.elId) return k.elId === key.elId;
+    if (key.act || key.id) return k.act === key.act && k.id === key.id && k.v === key.v && k.k === key.k;
+    return k.text === key.text;
+  };
+  const el = all.find(same);
+  if (el) padFocus(el);
+}
+
+function padOk() {
+  const el = document.activeElement;
+  if (!el || el === document.body || !isShown(el)) {
+    padMove(0, 1);
+    return;
+  }
+  if (el.tagName === 'SELECT') {
+    el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+  // Typing needs a keyboard; the field just stays selected.
+  if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(el.type))) return;
+  const key = padKey(el);
+  el.click();
+  setTimeout(() => {
+    const lost = () => !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected || !isShown(document.activeElement);
+    if (lost()) padRefocus(key);
+    if (lost()) padMove(0, 1);
+  }, 60);
+}
+
+function padBack() {
+  const menu = document.querySelector('.menu-list:not([hidden])');
+  if (menu) {
+    menu.hidden = true;
+    padFocus(menu.previousElementSibling);
+    return;
+  }
+  if (!$('#tour').hidden) {
+    closeTour();
+    return;
+  }
+  const back = [...document.querySelectorAll('[data-act="back"]')].find(isShown);
+  if (back) {
+    // Back on the library, the game just left keeps the focus.
+    const was = openId;
+    back.click();
+    setTimeout(() => {
+      padRefocus({ id: was });
+      if (!isShown(document.activeElement)) padMove(0, 1);
+    }, 60);
+    return;
+  }
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+}
+
+// LB/RB: the tabs of the page (Visão geral, Ajustes…) or of the library.
+function padTab(step) {
+  const bar = [...document.querySelectorAll('.page-tabs, #tabs')].find(isShown);
+  if (!bar) return;
+  const tabs = [...bar.querySelectorAll('button')].filter(isShown);
+  const on = tabs.findIndex((b) => b.classList.contains('on'));
+  const next = tabs[(on + step + tabs.length) % tabs.length];
+  if (!next) return;
+  const key = padKey(next);
+  next.click();
+  setTimeout(() => padRefocus(key), 60);
+}
+
+function renderPadHints() {
+  const el = $('#pad-hints');
+  if (!el) return;
+  el.innerHTML = `<span><b>${padName('ok')}</b> Escolher</span><span><b>${padName('back')}</b> Voltar</span>
+    <span><b>${padName('lb')}</b> <b>${padName('rb')}</b> Abas</span><span><b>${padName('menu')}</b> Modo TV</span>`;
+}
+
+function padPoll(t) {
+  const p = readPad();
+  if (p && !tvOn && $('#who').hidden) {
+    const e = padEdges(navPad, p, t);
+    if (p.changed) renderPadHints();
+    if (e.dx || e.dy) padMove(e.dx, e.dy);
+    if (e.ok) padOk();
+    if (e.back) padBack();
+    if (e.lb) padTab(-1);
+    if (e.rb) padTab(1);
+    if (e.menu) tvOpen();
+  } else if (p) {
+    // TV and "Quem vai jogar?" read the controller themselves; these presses are theirs.
+    padEdges(navPad, p, t);
+  }
+  requestAnimationFrame(padPoll);
+}
+
+// The hints go away when the mouse is back.
+document.addEventListener('mousemove', (e) => {
+  if (e.movementX || e.movementY) document.body.classList.remove('pad-on');
+});
+requestAnimationFrame(padPoll);
+
+// A card chosen with Tab or the controller opens with Enter like a button.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('card') && e.target.tabIndex === 0) {
+    e.target.click();
+    e.preventDefault();
+  }
+});
+
 // ---- Modo TV: full-screen library for a controller (Gamepad API) or the keyboard ----
 
 let tvOn = false;
@@ -3061,7 +3275,7 @@ function renderTv() {
           <div class="meta">${g.status === 'running' ? `Jogando há ${sessionLength(g)}` : playTime(g.total_seconds)}</div>
         </div>
       </div>`).join('')}</div>
-    <div class="hints"><span><b>A</b> / <b>Enter</b> Jogar</span><span><b>B</b> / <b>Esc</b> Sair do Modo TV</span><span><b>Direcional</b> / <b>setas</b> Escolher</span></div>`;
+    <div class="hints"><span><b>${padName('ok')}</b> / <b>Enter</b> Jogar</span><span><b>${padName('back')}</b> / <b>Esc</b> Sair do Modo TV</span><span><b>Direcional</b> / <b>setas</b> Escolher</span></div>`;
   document.querySelectorAll('#tv .card').forEach((el) => {
     el.addEventListener('mouseenter', () => { tvSel = Number(el.dataset.i); tvHighlight(); });
     el.addEventListener('click', () => { tvSel = Number(el.dataset.i); tvPlay(); });
@@ -3126,35 +3340,16 @@ async function tvClose() {
   try { await invoke('set_fullscreen', { on: false }); } catch { /* ignore */ }
 }
 
-// Standard gamepad mapping: 0 A, 1 B, 12-15 d-pad; left stick on axes 0/1.
 function tvPoll(t) {
   if (!tvOn) return;
-  const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
-  if (pad) {
-    const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
-    const ax = pad.axes[0] || 0;
-    const ay = pad.axes[1] || 0;
-    const dir = {
-      left: b(14) || ax < -0.5, right: b(15) || ax > 0.5,
-      up: b(12) || ay < -0.5, down: b(13) || ay > 0.5,
-    };
-    const press = (name, now) => {
-      const was = tvPad.held[name];
-      tvPad.held[name] = now;
-      return now && !was;
-    };
-    if (press('a', b(0))) tvPlay();
-    if (press('b', b(1))) tvClose();
-    const any = dir.left || dir.right || dir.up || dir.down;
-    // First move at once, then repeat while held.
-    if (any && (press('dir', true) || t >= tvPad.nextAt)) {
-      tvMove(dir.right - dir.left, dir.down - dir.up);
-      tvPad.nextAt = t + (tvPad.repeating ? 120 : 380);
-      tvPad.repeating = true;
-    } else if (!any) {
-      tvPad.held.dir = false;
-      tvPad.repeating = false;
-    }
+  const p = readPad();
+  if (p) {
+    // The hints show the buttons of the controller in use (✕ ○ on PlayStation).
+    if (p.changed) renderTv();
+    const e = padEdges(tvPad, p, t);
+    if (e.ok) tvPlay();
+    if (e.back) tvClose();
+    if (e.dx || e.dy) tvMove(e.dx, e.dy);
   }
   requestAnimationFrame(tvPoll);
 }

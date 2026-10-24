@@ -1,6 +1,6 @@
 [package]
 name = "recomphub"
-version = "0.26.0"
+version = "0.27.0"
 description = "Launcher for native ports of console games"
 edition = "2021"
 license = "MIT"
@@ -31,7 +31,7 @@ sha2 = "0.10"
 md-5 = "0.10"
 sysinfo = "0.32"
 base64 = "0.22"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_NetworkManagement_NetManagement", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_RestartManager"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_NetworkManagement_NetManagement", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_RestartManager", "Win32_System_LibraryLoader"] }
 
 [profile.release]
 codegen-units = 1

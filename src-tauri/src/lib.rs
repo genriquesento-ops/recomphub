@@ -15,6 +15,7 @@ mod library;
 mod ludusavi;
 mod meta;
 mod mods;
+mod pad;
 mod pcinfo;
 mod play;
 mod precheck;
@@ -3393,6 +3394,7 @@ pub fn run() {
             });
             github::set_token(&app.state::<AppState>().settings.lock().unwrap().github_token);
             play::spawn_watcher(app.handle().clone());
+            pad::spawn(app.handle().clone());
             tray::build(app.handle())?;
             let args: Vec<String> = std::env::args().collect();
             handle_args(app.handle(), &args);

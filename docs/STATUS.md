@@ -28,6 +28,7 @@
 - [x] **v0.24** Comunidade: .7z e .exe portátil, instaladores explicados, nome do jogo nos cartões (inFAMOUS, The Last Guardian…), tópicos native-port, xenonrecomp e ps3recomp
 - [x] **v0.25** Fotos na aba Comunidade (capa da SteamGridDB/IGDB ou imagem do README do projeto)
 - [x] **v0.26** "O jogo fechou com erro": código de saída, registro de erros do Windows, crash dumps e log do port viram uma explicação com botões (driver, Visual C++, Vulkan, cache de shaders) e um relatório para colar numa issue; visual mais enxuto (menus Mais e Adicionar, página do jogo e Configurações em abas) e tutorial de boas-vindas com a chave da SteamGridDB; biblioteca com contagem nas abas e filtros em menus; Comunidade com filtro de console e ordem (Recomendados, Em alta, Mais estrelas, Atualizados há pouco, Nome)
+- [x] **v0.27** Antes de jogar: DLLs que faltam (lidas do programa e das DLLs da pasta), arquivos só na nuvem do OneDrive, caminhos longos e pasta sem permissão, com Visual C++ e DirectX instalados com 1 clique (só da Microsoft, hash e assinatura conferidos, um pedido de administrador); "Mostrar o jogo" quando já está aberto; arquivo em uso diz qual programa o segura. O programa inteiro com controle: navegação por todas as telas, botões do controle em uso (✕ ○ ou A B), LB/RB nas abas, Menu abre o Modo TV, e segurar o botão Xbox/PS (ou View + Menu) traz o RecompHUB de volta de dentro do jogo
 - [x] Repositório público (MIT) na organização `recomphub-app`, com site no GitHub Pages; a situação atual está em `HANDOFF.md`
 - [ ] Mais ports no catálogo (cada um com dados conferidos no código-fonte)
 
@@ -55,6 +56,8 @@ Rodam no GitHub Actions antes de gerar o instalador (`cargo test --lib`):
 | Seu PC | Placas de vídeo lidas do PowerShell; processador sem MOVBE/BMI1/LZCNT bloqueia o gow3; driver antigo e adaptador básico avisados; valores do GpuPreference |
 | FPS | Quadros por segundo a partir do CSV do PresentMon; SID e nome do programa do PresentMon validados |
 | Steam | CRC igual ao padrão; atalhos existentes regravados byte a byte; clicar de novo atualiza sem duplicar e mantém o id; arquivo quebrado ou com dados sobrando é recusado |
+| Antes de jogar | Tabelas de importação de programas de 32 e 64 bits (normais e de carga atrasada); arquivo danificado não é lido além do fim; DLLs separadas em Visual C++, Visual C++ antigo, DirectX, Vulkan e arquivo do jogo; OneDrive pelos atributos; teste de escrita apaga o arquivo; downloads só de endereços da Microsoft, SHA-256 do endereço e assinatura `O=Microsoft Corporation`; códigos de saída do instalador |
+| Controle | Botões que chamam o RecompHUB (Xbox, View + Menu); dispara uma vez por toque longo, depois de 0,7 s |
 | Outros | Argumentos com aspas, nomes de variáveis, nomes de atalho, datas, comparação de versões |
 
 ## Regras de trabalho

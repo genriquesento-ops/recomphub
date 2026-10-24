@@ -306,6 +306,31 @@ o que foi escolhido e por quê. Mudar uma delas pede um motivo novo, escrito aqu
     menus (Mais e Adicionar) em vez de oito botões. Na primeira abertura, um tutorial de seis
     passos explica o programa e ajuda a colar a chave da SteamGridDB; ele volta em Mais > Tutorial.
     Telas virtuais (Parsec, Spacedesk, monitores IDD) não contam como placa de vídeo.
+57. **Antes de jogar: conferir sem mudar nada, corrigir só com um clique.** Ao abrir a página de
+    um jogo instalado (port, comunidade ou jogo de PC), o RecompHUB lê as tabelas de importação
+    do programa (normais e de carga atrasada) e das DLLs da própria pasta, um nível por vez, e
+    procura cada DLL na pasta do jogo, no System32 (SysWOW64 para programas de 32 bits), no
+    Windows e no PATH. Também acusa arquivos só na nuvem do OneDrive (lidos pelos atributos,
+    sem baixar), caminhos com 260 letras ou mais e pasta sem permissão de escrita (só para
+    jogos que guardam saves na própria pasta). Um programa que está só na nuvem não é lido,
+    para não ser baixado sem o jogador pedir.
+58. **Pacotes da Microsoft só da Microsoft.** "Instalar Visual C++" (x64 ou x86) e "Instalar
+    DirectX" baixam de endereços fixos no código (`aka.ms` e `download.microsoft.com`), seguem
+    redirecionamentos só para `*.microsoft.com`, conferem o SHA-256 quando o endereço final o
+    traz (Visual C++) e a assinatura Authenticode com `O=Microsoft Corporation` antes de abrir.
+    O instalador roda em modo silencioso com um único pedido de administrador e o RecompHUB
+    espera o código de saída (3010 = reiniciar). Visual C++ antigo (2005 a 2013) só ganha o link
+    da página da Microsoft. "Jogar" com o jogo já aberto traz a janela dele para a frente, e
+    um arquivo que não pôde ser gravado diz qual programa o está usando (Restart Manager).
+59. **O programa inteiro com controle.** A página lê o controle pela Gamepad API e move o foco
+    para o item mais próximo na direção apertada (navegação espacial), em qualquer tela; LB/RB
+    trocam as abas, Menu/Options abre o Modo TV, e uma barra embaixo mostra os botões do
+    controle em uso (✕ ○ no PlayStation, A B no Xbox; na Nintendo o A, à direita, confirma). A
+    barra some quando o mouse mexe. Com o RecompHUB atrás de um jogo, a página não recebe o
+    controle, então um processo nativo lê o XInput (`XInputGetStateEx`, que inclui o botão
+    Xbox): segurar o botão Xbox/PS ou View + Menu por 0,7 s traz a janela de volta. Segurar,
+    não apertar, porque o toque curto é da Xbox Game Bar. Controles PlayStation só são vistos
+    assim através da Steam ou do DS4Windows.
 
 ## Capas
 

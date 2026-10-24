@@ -594,45 +594,83 @@ pub fn runas_and_wait(exe_path: &Path, params: &str) -> Result<u32, String> {
     Ok(code)
 }
 
-/// Brings a running game's window to the front (restoring it when minimized). False when no
-/// window of the game's processes was found.
-pub fn focus(install_dir: &Path, exe_name: Option<&str>) -> bool {
+/// The first visible top-level window of one of `pids`, optionally with exactly this title.
+fn find_window(pids: Vec<u32>, title: Option<&str>) -> Option<windows_sys::Win32::Foundation::HWND> {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow, GW_OWNER, SW_RESTORE,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindow, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GW_OWNER};
     struct Search {
         pids: Vec<u32>,
+        title: Option<Vec<u16>>,
         found: HWND,
     }
     unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let s = &mut *(lparam as *mut Search);
         let mut pid: u32 = 0;
         GetWindowThreadProcessId(hwnd, &mut pid);
-        if s.pids.contains(&pid) && IsWindowVisible(hwnd) != 0 && GetWindow(hwnd, GW_OWNER).is_null() {
-            s.found = hwnd;
-            return 0;
+        if !s.pids.contains(&pid) || IsWindowVisible(hwnd) == 0 || !GetWindow(hwnd, GW_OWNER).is_null() {
+            return 1;
         }
-        1
+        if let Some(want) = &s.title {
+            let mut buf = [0u16; 128];
+            let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
+            if buf[..n] != want[..] {
+                return 1;
+            }
+        }
+        s.found = hwnd;
+        0
     }
+    let mut search = Search { pids, title: title.map(|t| t.encode_utf16().collect()), found: std::ptr::null_mut() };
+    // SAFETY: `search` outlives EnumWindows, which calls `each` synchronously.
+    unsafe {
+        EnumWindows(Some(each), &mut search as *mut Search as LPARAM);
+    }
+    (!search.found.is_null()).then_some(search.found)
+}
+
+/// Puts a window in front even when RecompHUB is not the foreground program (Windows only lets
+/// the program in front hand the focus over, so the input of both is joined for a moment).
+fn force_foreground(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
+    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+    // SAFETY: plain window calls on a handle that was just found; the threads are detached again.
+    unsafe {
+        let front = GetForegroundWindow();
+        let front_thread = if front.is_null() { 0 } else { GetWindowThreadProcessId(front, std::ptr::null_mut()) };
+        let me = GetCurrentThreadId();
+        let attach = front_thread != 0 && front_thread != me;
+        if attach {
+            AttachThreadInput(me, front_thread, 1);
+        }
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        BringWindowToTop(hwnd);
+        let ok = SetForegroundWindow(hwnd) != 0;
+        if attach {
+            AttachThreadInput(me, front_thread, 0);
+        }
+        ok
+    }
+}
+
+/// Brings a running game's window to the front (restoring it when minimized). False when no
+/// window of the game's processes was found.
+pub fn focus(install_dir: &Path, exe_name: Option<&str>) -> bool {
     let mut sys = System::new();
     refresh(&mut sys);
     let pids: Vec<u32> = processes_in(&sys, &folder_prefix(install_dir), exe_name).iter().map(|p| p.as_u32()).collect();
     if pids.is_empty() {
         return false;
     }
-    let mut search = Search { pids, found: std::ptr::null_mut() };
-    // SAFETY: `search` outlives EnumWindows, which calls `each` synchronously.
-    unsafe {
-        EnumWindows(Some(each), &mut search as *mut Search as LPARAM);
-        if search.found.is_null() {
-            return false;
-        }
-        if IsIconic(search.found) != 0 {
-            ShowWindow(search.found, SW_RESTORE);
-        }
-        SetForegroundWindow(search.found) != 0
-    }
+    find_window(pids, None).map(force_foreground).unwrap_or(false)
+}
+
+/// RecompHUB's own main window in front (the controller's "call back", pad.rs).
+pub fn bring_own_window() -> bool {
+    find_window(vec![std::process::id()], Some("RecompHUB")).map(force_foreground).unwrap_or(false)
 }
 
 pub fn start(

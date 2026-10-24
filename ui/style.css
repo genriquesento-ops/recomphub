@@ -496,3 +496,24 @@ button.small { font-size: 12px; padding: 4px 10px; }
 .community-meta .sources summary { cursor: pointer; color: var(--muted); }
 .community-meta .sources summary:hover { color: var(--text); }
 .community-meta .sources[open] { flex-basis: 100%; }
+
+/* Controle: the focused item gets a thick red frame, readable from the couch, and a bar at the
+   bottom names the buttons of the controller in use. Both go away when the mouse moves. */
+body.pad-on :focus { outline: 3px solid var(--red); outline-offset: 3px; }
+body.pad-on .card:focus { outline: none; }
+body.pad-on .card:focus .cover { border-color: var(--red); outline: 3px solid var(--red); }
+body.pad-on .card:focus .title { color: var(--red); }
+.card:focus-visible { outline: none; }
+.card:focus-visible .cover { border-color: var(--red); }
+.pad-hints { display: none; }
+body.pad-on .pad-hints {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; gap: 28px; padding: 10px 24px;
+  color: var(--muted); background: var(--bg); border-top: 2px solid var(--rule);
+}
+body.pad-on main { padding-bottom: 64px; }
+.pad-hints b {
+  display: inline-block; min-width: 1.7em; padding: 0 6px; margin-right: 2px; text-align: center;
+  font-family: var(--mono); font-weight: 600; color: var(--text);
+  border: 1.5px solid var(--rule); border-radius: 2px;
+}
